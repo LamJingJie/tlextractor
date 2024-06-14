@@ -1,7 +1,5 @@
 from colorama import Fore
-import re
 from playwright.sync_api import sync_playwright, Page
-import time
 import json
 
 url = str()
@@ -11,6 +9,8 @@ val = str()
 # Tasks
 # 1. Extract data(json/svg) from the page its currently at
 #    -> Perform data transformation, only saving the necessary data
+# 2. Fork tldraw prj and make changes to its layout/template
+# 3. Split the json data to image, names, and other data
 
 # Example: https://www.tldraw.com/r/eRZwoL-G5ufBB3KTRaSbW?v=-659,-888,5720,4826&p=HGtpLC0ipiTvgK6awql7m
 
@@ -28,7 +28,7 @@ def ActivateBot(url, chosen_frame, page: Page):
         dropdown_menu = page.query_selector_all(tldraw_menu_item)
 
         if(not Dropdown_Checker(chosen_frame, dropdown_menu)):
-            print(Fore.YELLOW + "Frame not found. Exiting program." + Fore.RESET)
+            print(Fore.YELLOW + "Page not found. Exiting program." + Fore.RESET)
             exit()
         
         page.wait_for_load_state('load')
@@ -61,12 +61,27 @@ def Dropdown_Checker(chosen_frame, menu):
 def ExtractData(chosen_frame: str, content: json):
     frame_id = ''
 
-    # Get the frame id
-    for shape in content['shapes']:
+    # Get the frame id: Still Big(O) = N but half the iteration using 2 pointer
+    start_pointer = 0
+    end_pointer = len(content['shapes']) - 1
+    while start_pointer < end_pointer:
+        start_shape = content['shapes'][start_pointer]
+        end_shape = content['shapes'][end_pointer]
+
         # Get frame where all the data is stored and check if the frame is the chosen frame 
-        if shape['type'] == 'frame' and chosen_frame in shape['props'].get('name', '').lower():
-            frame_id = shape['id']
+        if start_shape['type'] == 'frame' and chosen_frame == start_shape['props'].get('name', '').lower() and start_shape['parentId'].startswith('page:'):
+            frame_id = content['shapes'][start_pointer]['id']
             break
+        elif end_shape['type'] == 'frame' and chosen_frame == end_shape['props'].get('name', '').lower() and end_shape['parentId'].startswith('page:'):
+            frame_id = content['shapes'][end_pointer]['id']
+            break
+        start_pointer += 1
+        end_pointer -= 1
+    
+    if frame_id == '':
+        print(Fore.YELLOW + "Frame not found. Ensure that the FRAME name matches exactly the PAGE name." + Fore.RESET)
+        exit()
+
     print(frame_id)
 
 
@@ -80,7 +95,7 @@ while url == "":
 
 print(Fore.LIGHTMAGENTA_EX + "\nType 'ALL' to extract all frames. Otherwise, enter the frame(s) you want to extract." + Fore.RESET)
 while True:
-    val = input(Fore.LIGHTMAGENTA_EX+"\nWhen finished type 'DONE'.\n::" + Fore.RESET).lower()
+    val = input(Fore.LIGHTMAGENTA_EX+"\nWhen finished type 'DONE'.\n:: " + Fore.RESET).lower()
 
     # Check if the user wants to extract all frames
     if (len(target) == 0 and val == "all"):
