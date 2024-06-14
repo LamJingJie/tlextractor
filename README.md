@@ -1,12 +1,11 @@
 # tlextractor
 
-
-<h1>Requirements</h1>
+## Requirements
 - pipenv
 - Python 3^
 
-<h1>Running the script</h1>
-- <b>pip install pipenv</b> to install virtual environment
-- <b>pipenv install</b> install dependencies
-- <b>pipenv shell</b> to run in virtual environment
-- <b>python tlextractor.py</b> to run the script
+## Running the script
+1. Install virtual environment: `pip install pipenv`
+2. Run in virtual environment: `pipenv shell`
+3. Install dependencies: `pipenv install`
+4. Run the script: `python tlextractor.py`
