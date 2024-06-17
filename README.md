@@ -1,6 +1,6 @@
 # TLExtractor
 
-TLExtractor is a Python script that extracts specific data from tldraw.
+TLExtractor is a Python script that extracts specific data from a tldraw template.
 
 ## Prerequisites
 
