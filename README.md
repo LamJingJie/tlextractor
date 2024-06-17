@@ -6,7 +6,7 @@ TLExtractor is a Python script that extracts specific data from tldraw.
 
 Before you begin, ensure you have met the following requirements:
 
-* You have installed the latest version of [pipenv](https://pipenv.pypa.io/en/latest/).
+* You have installed the latest version of [pipenv](https://pipenv.pypa.io/en/latest/) and [pip](https://pypi.org/project/pip/#history).
 * You are using a `Python 3.x` version.
 
 ## Installing TLExtractor
