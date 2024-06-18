@@ -49,11 +49,11 @@ def process_pages(url, targets, context: BrowserContext):
         try:
             website_data.append(ActivateBot(url, frame, page))
         except Exception as e:
-            print("\n" + str(e))
+            # This is added to ensure that the loading screen stops and the thread is joined before the program exits
             page.close()
             stop_loading.set() # Stop the loading screen
             loading_thread.join() # Wait for the loading screen to finish
-            exit()
+            raise Exception(e)
 
         page.close()
         stop_loading.set() # Stop the loading screen
@@ -289,7 +289,7 @@ def save_data(page_data):
         with open("tldraw_data.json", 'w') as file:
             json.dump(page_data, file, indent=4)
     except Exception as e:
-        raise Exception("Error 05: ", Fore.YELLOW + "Error saving data." + Fore.RESET)
+        raise Exception(Fore.YELLOW + "Error 05: " + "Error saving data." + Fore.RESET)
 
 # -----------------End of Functions-----------------#
 
@@ -338,8 +338,13 @@ with sync_playwright() as p:
         page = context.new_page()
         targets = get_all_pages(url, page)
         page.close()
-        
-    save_data(process_pages(url, targets, context))
+    try:
+        complete_data = process_pages(url, targets, context)
+        save_data(complete_data)
+    except Exception as e:
+        print(e)
+        exit()
+    
     context.close()
     browser.close()
     print(Fore.GREEN + "Data successfully extracted and saved as 'tldraw_data.json'." + Fore.RESET)
