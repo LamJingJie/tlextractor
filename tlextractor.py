@@ -273,7 +273,7 @@ def loading_screen(curr_frame, stop_loading):
     print("\n" + curr_frame + " completed.")
 
 
-
+# Save the data to a json file
 def save_data(page_data):
     try:
         with open("tldraw_data.json", 'w') as file:
