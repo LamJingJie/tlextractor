@@ -29,7 +29,38 @@ import time
 
 # Example: https://www.tldraw.com/r/fOZmgi9MQzQc-rrXnpAz6?v=-167,-196,5343,2630&p=HGtpLC0ipiTvgK6awql7m
 
+#Video
+'''
+https://github-production-user-asset-6210df.s3.amazonaws.com/58838335/340716156-68d26e9a-b312-4af8-9200-c902aa7527f3.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20240618%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240618T143126Z&X-Amz-Expires=300&X-Amz-Signature=38cc577f04cab4a33903b9ba850aceb69ce931e4fda028dd33d43ce8678bd1cb&X-Amz-SignedHeaders=host&actor_id=58838335&key_id=0&repo_id=813742945
+'''
+
 # -----------------Functions-----------------#
+
+# Process pages chosen by the user
+def process_pages(url, targets, context: BrowserContext):
+    website_data = []
+    # Loop through each frame and extract the data
+    for frame in targets:
+        stop_loading = threading.Event()
+        loading_thread = threading.Thread(target=loading_screen, args=(frame, stop_loading))
+        loading_thread.start() # Start the loading screen
+
+        page = context.new_page()
+        try:
+            website_data.append(ActivateBot(url, frame, page))
+        except Exception as e:
+            print("\n" + str(e))
+            page.close()
+            stop_loading.set() # Stop the loading screen
+            loading_thread.join() # Wait for the loading screen to finish
+            exit()
+
+        page.close()
+        stop_loading.set() # Stop the loading screen
+        loading_thread.join() # Wait for the loading screen to finish
+
+    return website_data
+
 # playwrite bot for each page
 def ActivateBot(url, chosen_frame, page: Page):
     tldraw_menu_list = '.tlui-page-menu__list'
@@ -82,7 +113,8 @@ def ExtractData(chosen_frame: str, content: json):
     # Leave only the necessary shapes (images and text with names)
     content['shapes'] = [shape_data for shape_data in content['shapes'] if shape_data['type'] == 'frame' or
                          shape_data['type'] == 'image' or
-                         (shape_data['type'] == 'text' and shape_data['props'].get('text', '').strip() != '')]
+                         (shape_data['type'] == 'text' and shape_data['props'].get('text', '').strip() != '') or
+                         shape_data['type'] == 'group']
 
     # Get the frame id: Still Big(O) = N but half the iteration using 2 pointer
     start_pointer = 0
@@ -122,6 +154,7 @@ def ExtractData(chosen_frame: str, content: json):
         'description': desc,
         'data': students
     } 
+    #print(desc, date)
     return page_data
 
 
@@ -166,10 +199,10 @@ def get_student_data(content: json, subtitles):
                 student_name = shape['props'].get('name', '')
                 # Array of student image asset id
                 student_asset_id = get_img_assetID(
-                    student_id, content['shapes'])
+                                                student_id, content['shapes'])
                 student_img = get_student_img(
-                    # Array of student image
-                    student_asset_id, content['assets'])
+                                            # Array of student image
+                                            student_asset_id, content['assets'])
                 student = {
                     'name': student_name,
                     'image': student_img
@@ -188,9 +221,13 @@ def get_student_data(content: json, subtitles):
 def get_img_assetID(student_id, shapes):
     student_asset_id = []
     for shape in shapes:
-        # Get the student image asset id
-        if student_id == shape['parentId'] and shape['type'] == 'image':
-            student_asset_id.append(shape['props']['assetId'])
+        # Get the student image asset id's
+        if student_id == shape['parentId']:
+            if shape['type'] == 'image':
+                student_asset_id.append(shape['props']['assetId'])
+            # Check if the student is in a group if so, get the grp id and perform a recursive call
+            elif shape['type'] == 'group':
+                student_asset_id.extend(get_img_assetID(shape['id'], shapes))
     return student_asset_id
 
 
@@ -230,33 +267,6 @@ def get_all_pages(url, page: Page):
     dropdown_menu = page.query_selector('.tlui-page-menu__list')
     page_list = dropdown_menu.inner_text().lower().split("\n")
     return page_list
-
-
-
-
-def process_pages(url, targets, context: BrowserContext):
-    website_data = []
-    # Loop through each frame and extract the data
-    for frame in targets:
-        stop_loading = threading.Event()
-        loading_thread = threading.Thread(target=loading_screen, args=(frame, stop_loading))
-        loading_thread.start() # Start the loading screen
-
-        page = context.new_page()
-        try:
-            website_data.append(ActivateBot(url, frame, page))
-        except Exception as e:
-            print("\n" + str(e))
-            page.close()
-            stop_loading.set() # Stop the loading screen
-            loading_thread.join() # Wait for the loading screen to finish
-            exit()
-
-        page.close()
-        stop_loading.set() # Stop the loading screen
-        loading_thread.join() # Wait for the loading screen to finish
-
-    return website_data
 
 
 
@@ -319,7 +329,7 @@ if (len(targets) == 0):
 # Where all the magic happens
 with sync_playwright() as p:
 
-    browser = p.chromium.launch(headless=False)
+    browser = p.chromium.launch(headless=True)
     context = browser.new_context(
                                 # Add clipboard permissions
                                 permissions=["clipboard-read", "clipboard-write"])
