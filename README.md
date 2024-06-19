@@ -6,10 +6,10 @@ TLExtractor is a Python script designed to extract specific data from pages from
 
 The script requires the data to be in a specific format:
 
-#### Template 1
+#### Template 1 - For 1 submission per student
 ![Template Format 1](./img/template_format1.png)
 
-#### Template 2
+#### Template 2 - For 2++ submissions per student
 ![Template Format 2](/img/template_format2.png)
 
 * The text that includes the page description and date should be in this format: `<description>::<date>`. It must be nested at the main frame ONLY.
