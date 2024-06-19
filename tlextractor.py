@@ -38,7 +38,17 @@ https://github-production-user-asset-6210df.s3.amazonaws.com/58838335/340716156-
 
 # Process pages chosen by the user
 def process_pages(url, targets, context: BrowserContext):
-    website_data = []
+    prj_title = ''
+    all_page_data = []
+
+    # Get project title
+    page = context.new_page()
+    page.goto(url)
+    page.wait_for_selector(".tlui-popover")
+    page.click(".tlui-button__menu")
+    prj_title = page.query_selector(".tlui-top-zone__container").inner_text().strip().replace('\u00a0', ' ')
+    page.close()
+    
     # Loop through each frame and extract the data
     for frame in targets:
         stop_loading = threading.Event()
@@ -47,7 +57,8 @@ def process_pages(url, targets, context: BrowserContext):
 
         page = context.new_page()
         try:
-            website_data.append(ActivateBot(url, frame, page))
+            page_data = ActivateBot(url, frame, page)
+            all_page_data.append(page_data)
         except Exception as e:
             # This is added to ensure that the loading screen stops and the thread is joined before the program exits
             page.close()
@@ -59,7 +70,12 @@ def process_pages(url, targets, context: BrowserContext):
         stop_loading.set() # Stop the loading screen
         loading_thread.join() # Wait for the loading screen to finish
 
-    return website_data
+    website_data = {
+        "project title": prj_title,
+        "data": all_page_data
+    }
+
+    return website_data, prj_title
 
 # playwrite bot for each page
 def ActivateBot(url, chosen_frame, page: Page):
@@ -70,6 +86,7 @@ def ActivateBot(url, chosen_frame, page: Page):
         page.goto(url)
         page.wait_for_selector(".tlui-popover")
         page.click(".tlui-button__menu")
+
         page.wait_for_selector(tldraw_menu_list)
         dropdown_menu = page.query_selector_all(tldraw_menu_item)
 
@@ -90,6 +107,7 @@ def ActivateBot(url, chosen_frame, page: Page):
         raise Exception(Fore.YELLOW + "Error 01: " + str(e) + Fore.RESET) 
 
     page_data = ExtractData(chosen_frame, json_content)
+
     return page_data
 
 
@@ -283,10 +301,10 @@ def loading_screen(curr_frame, stop_loading):
 
 
 # Save the data to a json file
-def save_data(page_data):
+def save_data(data, prj_title):
     try:
-        with open("tldraw_data.json", 'w') as file:
-            json.dump(page_data, file, indent=4)
+        with open(f"{prj_title}.json", 'w') as file:
+            json.dump(data, file, indent=4)
     except Exception as e:
         raise Exception(Fore.YELLOW + "Error 05: " + "Error saving data." + Fore.RESET)
 
@@ -326,7 +344,8 @@ if (len(targets) == 0):
 
 # Where all the magic happens
 with sync_playwright() as p:
-
+    prj_title = ''
+    complete_data = None
     browser = p.chromium.launch(headless=True)
     context = browser.new_context(
                                 # Add clipboard permissions
@@ -337,13 +356,13 @@ with sync_playwright() as p:
         targets = get_all_pages(url, page)
         page.close()
     try:
-        complete_data = process_pages(url, targets, context)
-        save_data(complete_data)
+        complete_data, prj_title = process_pages(url, targets, context)
+        save_data(complete_data, prj_title)
     except Exception as e:
         print(e)
         exit()
     
     context.close()
     browser.close()
-    print(Fore.GREEN + "Data successfully extracted and saved as 'tldraw_data.json'." + Fore.RESET)
+    print(Fore.GREEN + f"Data successfully extracted and saved as '{prj_title}.json'." + Fore.RESET)
 # -----------------End of Main Program-----------------#
