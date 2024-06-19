@@ -110,8 +110,8 @@ def ExtractData(chosen_frame: str, content: json):
     date = ''
     subtitle_students = []
 
-    # Leave only the necessary shapes (images and text with names)
-    content['shapes'] = [shape_data for shape_data in content['shapes'] if shape_data['type'] == 'frame' or
+    # Leave only the necessary shapes (images, text with names, groups and frames with names)
+    content['shapes'] = [shape_data for shape_data in content['shapes'] if (shape_data['type'] == 'frame' and shape_data['props'].get('name', '').strip() != '') or
                          shape_data['type'] == 'image' or
                          (shape_data['type'] == 'text' and shape_data['props'].get('text', '').strip() != '') or
                          shape_data['type'] == 'group']
@@ -124,10 +124,10 @@ def ExtractData(chosen_frame: str, content: json):
         end_shape = content['shapes'][end_pointer]
 
         # Get frame where all the data is stored and check if the frame is the chosen frame
-        if start_shape['type'] == 'frame' and chosen_frame == start_shape['props'].get('name', '').lower().strip() and start_shape['parentId'].startswith('page:'):
+        if start_shape['type'] == 'frame' and chosen_frame == start_shape['props']['name'].lower().strip() and start_shape['parentId'].startswith('page:'):
             frame_id = content['shapes'][start_pointer]['id']
             break
-        elif end_shape['type'] == 'frame' and chosen_frame == end_shape['props'].get('name', '').lower().strip() and end_shape['parentId'].startswith('page:'):
+        elif end_shape['type'] == 'frame' and chosen_frame == end_shape['props']['name'].lower().strip() and end_shape['parentId'].startswith('page:'):
             frame_id = content['shapes'][end_pointer]['id']
             break
         start_pointer += 1
@@ -195,7 +195,7 @@ def get_student_data(content: json, subtitles):
             # Get the student name for each subtitle
             if subtitle['id'] == shape['parentId'] and shape['type'] == 'frame':
                 student_id = shape['id']
-                student_name = shape['props'].get('name', '')
+                student_name = shape['props']['name']
                 # Array of student image asset id
                 student_asset_id = get_img_assetID(
                                                 student_id, content['shapes'])
@@ -304,8 +304,7 @@ while url == "":
 print(Fore.LIGHTMAGENTA_EX +
       "\nType 'ALL' to extract all frames. Otherwise, enter the frame(s) you want to extract." + Fore.RESET)
 while True:
-    val = input(Fore.LIGHTMAGENTA_EX +
-                "\nWhen finished type 'DONE'.\n:: " + Fore.RESET).lower().strip()
+    val = input(Fore.LIGHTMAGENTA_EX + "\nWhen finished type 'DONE'.\n:: " + Fore.RESET).lower().strip()
 
     # Check if the user wants to extract all frames
     if (len(targets) == 0 and val == "all"):
