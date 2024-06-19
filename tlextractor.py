@@ -96,7 +96,7 @@ def ActivateBot(url, chosen_frame, page: Page):
 # Loop through the dropdown menu and click the target page
 def Dropdown_Checker(chosen_frame, menu):
     for option in menu:
-        value = option.inner_text().lower()
+        value = option.inner_text().lower().strip()
         if chosen_frame == value:
             option.click()
             return True
@@ -108,7 +108,7 @@ def ExtractData(chosen_frame: str, content: json):
     frame_id = ''
     desc = ''
     date = ''
-    students = []
+    subtitle_students = []
 
     # Leave only the necessary shapes (images and text with names)
     content['shapes'] = [shape_data for shape_data in content['shapes'] if shape_data['type'] == 'frame' or
@@ -124,10 +124,10 @@ def ExtractData(chosen_frame: str, content: json):
         end_shape = content['shapes'][end_pointer]
 
         # Get frame where all the data is stored and check if the frame is the chosen frame
-        if start_shape['type'] == 'frame' and chosen_frame == start_shape['props'].get('name', '').lower() and start_shape['parentId'].startswith('page:'):
+        if start_shape['type'] == 'frame' and chosen_frame == start_shape['props'].get('name', '').lower().strip() and start_shape['parentId'].startswith('page:'):
             frame_id = content['shapes'][start_pointer]['id']
             break
-        elif end_shape['type'] == 'frame' and chosen_frame == end_shape['props'].get('name', '').lower() and end_shape['parentId'].startswith('page:'):
+        elif end_shape['type'] == 'frame' and chosen_frame == end_shape['props'].get('name', '').lower().strip() and end_shape['parentId'].startswith('page:'):
             frame_id = content['shapes'][end_pointer]['id']
             break
         start_pointer += 1
@@ -147,14 +147,13 @@ def ExtractData(chosen_frame: str, content: json):
         raise Exception("Error 03: ", Fore.YELLOW + "No description and date found. Ensure that the description is in the format '<description>::<date>'." + Fore.RESET)
 
     # Get the student data
-    students = get_student_data(content, subtitles)
+    subtitle_students = get_student_data(content, subtitles)
     page_data = {
         'name': chosen_frame,
         'date': date,
         'description': desc,
-        'data': students
+        'data': subtitle_students
     } 
-    #print(desc, date)
     return page_data
 
 
