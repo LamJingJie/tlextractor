@@ -64,7 +64,7 @@ def process_pages(url, targets, context: BrowserContext):
             page.close()
             stop_loading.set() # Stop the loading screen
             loading_thread.join() # Wait for the loading screen to finish
-            raise Exception(e)
+            raise Exception("Error 01:",str(e))
 
         page.close()
         stop_loading.set() # Stop the loading screen
@@ -126,7 +126,6 @@ def ExtractData(chosen_frame: str, content: json):
     frame_id = ''
     desc = ''
     date = ''
-    subtitle_students = []
 
     # Leave only the necessary shapes (images, text with names, groups and frames with names)
     content['shapes'] = [shape_data for shape_data in content['shapes'] if (shape_data['type'] == 'frame' and shape_data['props'].get('name', '').strip() != '') or
@@ -154,7 +153,7 @@ def ExtractData(chosen_frame: str, content: json):
     if frame_id == '':
         raise Exception("Error 02: ", Fore.YELLOW + "Frame not found. Ensure that the FRAME name matches exactly the PAGE name." + Fore.RESET)
 
-    frame_desc, subtitles = get_main_info(content['shapes'], frame_id)
+    frame_desc = get_Frame_Desc(content['shapes'], frame_id)
 
     # Get the description and date
     if "::" in frame_desc:
@@ -165,92 +164,65 @@ def ExtractData(chosen_frame: str, content: json):
         raise Exception("Error 03: ", Fore.YELLOW + "No description and date found. Ensure that the description is in the format '<description>::<date>'." + Fore.RESET)
 
     # Get the student data
-    subtitle_students = get_student_data(content, subtitles)
+    students = get_student_data(content['shapes'], frame_id, content['assets'])
     page_data = {
         'name': chosen_frame,
         'date': date,
         'description': desc,
-        'data': subtitle_students
+        'data': students
     } 
     return page_data
 
 
 # Get the main information of the frame
-def get_main_info(shapes, frame_id):
+def get_Frame_Desc(shapes, frame_id):
     frame_desc = ''
-    subtitles = []
 
     for shape in shapes:
         # Get the frame description and date
         if shape['parentId'] == frame_id and shape['type'] == 'text' and '::' in shape['props']['text']:
             frame_desc = shape['props']['text']
+    return frame_desc
 
-        # Get subtitles id and name
+# Get student data
+def get_student_data(shapes, frame_id, assets,name=None):  
+    student_data = {}
+    student_imgs = []
+    for shape in shapes:
+        # Stops here when an image is found and returns the student data
+        if shape['parentId'] == frame_id and shape['type'] == 'image':
+            img = get_student_img(shape['props']['assetId'], assets)
+            student_imgs.append(img)
+            
+        # Perform a recursive call if its a frame 
         if shape['parentId'] == frame_id and shape['type'] == 'frame':
-            subtitle = {
-                'id': shape['id'],
-                'name': shape['props'].get('name', '')
-            }
-            subtitles.append(subtitle)
+            name = shape['props']['name']
+            student_data.update(get_student_data(shapes, shape['id'],assets, name)) # Add
 
-    if len(subtitles) == 0:
-        raise Exception("Error 04: ", Fore.YELLOW + "No subtitles found. Exiting program." + Fore.RESET)
-    
-    return frame_desc, subtitles
+            name = None # Reset the name to None after the recursive call
+
+        # Check if the student is in a group if so, get the grp id and perform a recursive call
+        if shape['parentId'] == frame_id and shape['type'] == 'group':
+            student_data.update(get_student_data(shapes, shape['id'],assets, name))
 
 
-def get_student_data(content: json, subtitles):
-    student_data = []  # Stores each of the subtitle names and its students
-
-    student_name = ''
-    student_img = []
-    shapes = content['shapes']
-
-    for subtitle in subtitles:
-        subtitle_students = []
-
-        for shape in shapes:
-            # Get the student name for each subtitle
-            if subtitle['id'] == shape['parentId'] and shape['type'] == 'frame':
-                student_id = shape['id']
-                student_name = shape['props']['name']
-                # Array of student image asset id
-                student_asset_id = get_img_assetID(
-                                                student_id, content['shapes'])
-                student_img = get_student_img(
-                                            # Array of student image
-                                            student_asset_id, content['assets'])
-                student = {
-                    'name': student_name,
-                    'image': student_img
-                }
-                subtitle_students.append(student)
-
-        subtitle = {
-            'subtitle': subtitle['name'],
-            'students': subtitle_students
+    if name is not None:
+        student = {
+            'image': student_imgs
         }
-        student_data.append(subtitle)  # Main data is stored here
 
+        # Ensuring that the student_data is not overwritten by duplicate names
+        if name in student_data:
+            # Append the images to the existing student data
+            student_data[name]['image'].extend(student_imgs)
+        else:
+            student_data[name] = student
     return student_data
 
 
-def get_img_assetID(student_id, shapes):
-    student_asset_id = []
-    for shape in shapes:
-        # Get the student image asset id's
-        if student_id == shape['parentId']:
-            if shape['type'] == 'image':
-                student_asset_id.append(shape['props']['assetId'])
-            # Check if the student is in a group if so, get the grp id and perform a recursive call
-            elif shape['type'] == 'group':
-                student_asset_id.extend(get_img_assetID(shape['id'], shapes))
-    return student_asset_id
 
 
 def get_student_img(asset_id, assets):
-    student_img = []
-
     def convert_img_to_base64_str(img_url):
         response = requests.get(img_url)
         if response.status_code == 200:
@@ -261,16 +233,12 @@ def get_student_img(asset_id, assets):
         else:
             return ""
 
-    if len(asset_id) != 0:
-        for id in asset_id:
-            for asset in assets:
-                # Get the student image
-                if id == asset['id']:
-                    base64_img = convert_img_to_base64_str(
-                        asset['props']['src'])
-                    student_img.append(base64_img)
-                    break
-    return student_img
+    for asset in assets:
+        # Get the student image
+        if asset_id == asset['id']:
+            base64_img = convert_img_to_base64_str(
+                asset['props']['src'])
+            return base64_img
 
 
 
