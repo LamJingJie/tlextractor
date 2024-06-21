@@ -64,7 +64,7 @@ def process_pages(url, targets, context: BrowserContext):
             page.close()
             stop_loading.set() # Stop the loading screen
             loading_thread.join() # Wait for the loading screen to finish
-            raise Exception("Error 01:",str(e))
+            raise Exception("Error 00:",str(e))
 
         page.close()
         stop_loading.set() # Stop the loading screen
@@ -91,7 +91,7 @@ def ActivateBot(url, chosen_frame, page: Page):
         dropdown_menu = page.query_selector_all(tldraw_menu_item)
 
         if (not Dropdown_Checker(chosen_frame, dropdown_menu)):
-            raise Exception(Fore.YELLOW + "Page not found. Exiting program." + Fore.RESET)
+            raise Exception("Page not found. Exiting program.")
 
         page.wait_for_load_state('load')
 
@@ -104,7 +104,7 @@ def ActivateBot(url, chosen_frame, page: Page):
         json_content = json.loads(clipboard_content)
 
     except Exception as e:
-        raise Exception(Fore.YELLOW + "Error 01: " + str(e) + Fore.RESET) 
+        raise Exception("Error 01: " + str(e)) 
 
     page_data = ExtractData(chosen_frame, json_content)
 
@@ -151,7 +151,7 @@ def ExtractData(chosen_frame: str, content: json):
         end_pointer -= 1
 
     if frame_id == '':
-        raise Exception("Error 02: ", Fore.YELLOW + "Frame not found. Ensure that the FRAME name matches exactly the PAGE name." + Fore.RESET)
+        raise Exception("Error 02: Frame not found. Ensure that the FRAME name matches exactly the PAGE name.")
 
     frame_desc = get_Frame_Desc(content['shapes'], frame_id)
 
@@ -161,7 +161,7 @@ def ExtractData(chosen_frame: str, content: json):
         desc = desc.strip()
         date = date.strip()
     else:
-        raise Exception("Error 03: ", Fore.YELLOW + "No description and date found. Ensure that the description is in the format '<description>::<date>'." + Fore.RESET)
+        raise Exception("Error 03: No description and date found. Ensure that the description is in the format '<description>::<date>'.")
 
     # Get the student data
     students = get_student_data(content['shapes'], frame_id, content['assets'])
@@ -197,7 +197,7 @@ def get_student_data(shapes, frame_id, assets,name=None):
         # Perform a recursive call if its a frame 
         if shape['parentId'] == frame_id and shape['type'] == 'frame':
             name = shape['props']['name']
-            student_data.update(get_student_data(shapes, shape['id'],assets, name)) # Add
+            student_data.update(get_student_data(shapes, shape['id'],assets, name))
 
             name = None # Reset the name to None after the recursive call
 
@@ -211,7 +211,7 @@ def get_student_data(shapes, frame_id, assets,name=None):
             'image': student_imgs
         }
 
-        # Ensuring that the student_data is not overwritten by duplicate names
+        # Ensuring that the student_data is not overwritten by duplicate names by checking dictionary keys
         if name in student_data:
             # Append the images to the existing student data
             student_data[name]['image'].extend(student_imgs)
@@ -274,7 +274,7 @@ def save_data(data, prj_title):
         with open(f"{prj_title}.json", 'w') as file:
             json.dump(data, file, indent=4)
     except Exception as e:
-        raise Exception(Fore.YELLOW + "Error 05: " + "Error saving data." + Fore.RESET)
+        raise Exception("Error 05:", str(e))
 
 # -----------------End of Functions-----------------#
 
@@ -327,7 +327,7 @@ with sync_playwright() as p:
         complete_data, prj_title = process_pages(url, targets, context)
         save_data(complete_data, prj_title)
     except Exception as e:
-        print(e)
+        print(Fore.YELLOW + str(e) + Fore.RESET)
         exit()
     
     context.close()
