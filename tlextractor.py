@@ -15,13 +15,12 @@ import time
         "description": "First iteration of site in blender/rhino",
         "data": [
             {
-                "subtitle": "The Proto-Cementary",
-                "students": [
+                "Jia Wei": 
                     {
-                    "name": "Jia Wei",
-                    "image": ["base64_img", "base64_img"]
+                        "image": [
+                                    "base64_img", "base64_img"
+                                 ]
                     },
-                ]
             }
         ]
     }
