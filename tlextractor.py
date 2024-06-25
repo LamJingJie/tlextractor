@@ -32,7 +32,7 @@ import os
 
 #Video
 '''
-https://github-production-user-asset-6210df.s3.amazonaws.com/58838335/340716156-68d26e9a-b312-4af8-9200-c902aa7527f3.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20240618%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240618T143126Z&X-Amz-Expires=300&X-Amz-Signature=38cc577f04cab4a33903b9ba850aceb69ce931e4fda028dd33d43ce8678bd1cb&X-Amz-SignedHeaders=host&actor_id=58838335&key_id=0&repo_id=813742945
+https://github.com/LamJingJie/tlextractor/assets/58838335/8ea12541-120f-4b0e-8577-770f6d90232a
 '''
 
 # -----------------Functions-----------------#
