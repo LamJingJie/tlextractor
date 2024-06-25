@@ -9,7 +9,7 @@ The script requires the data to be in a specific format:
 * The text that includes the page description and date should be in this format: `<description>::<date>`. It must be nested at the main frame only.
 * Use only frames to 'group' things together.
 * Ensure the main frame name is the exact same as the page name.
-* Submissions for every person should be framed respectively with their names.
+* Submissions for every person should be framed together with their names in that frame.
 
 #### Template 1 - For 1 submission per student
 ![Template Format 1](./img/template_format1.png)
