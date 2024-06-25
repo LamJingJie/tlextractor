@@ -1,6 +1,6 @@
 # TLExtractor
 
-TLExtractor is a Python script designed to extract specific data from pages from tldraw. It uses a template to ensure the accuracy of the data being extracted.
+TLExtractor is a Python script designed to extract specific data from pages from tldraw. It uses a template to ensure the accuracy of the data being extracted. Data extracted will be saved as JSON data while images will be stored in a seperate folder that is titled the same as the project title.
 
 ## Template Format
 
@@ -9,6 +9,7 @@ The script requires the data to be in a specific format:
 * The text that includes the page description and date should be in this format: `<description>::<date>`. It must be nested at the main frame only.
 * Use only frames to 'group' things together.
 * Ensure the main frame name is the exact same as the page name.
+* Submissions for every person should be framed respectively with their names.
 
 #### Template 1 - For 1 submission per student
 ![Template Format 1](./img/template_format1.png)

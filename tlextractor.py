@@ -1,11 +1,13 @@
 from colorama import Fore
 from playwright.sync_api import sync_playwright, Page, BrowserContext
 import json
-import base64
 import requests
 import threading
 import sys
 import time
+from PIL import Image
+import io
+import os
 
 # Data Structure
 '''[
@@ -45,8 +47,14 @@ def process_pages(url, targets, context: BrowserContext):
     page.goto(url)
     page.wait_for_selector(".tlui-popover")
     page.click(".tlui-button__menu")
-    prj_title = page.query_selector(".tlui-top-zone__container").inner_text().strip().replace('\u00a0', ' ')
-    page.close()
+    prj_title = page.query_selector(".tlui-top-zone__container").inner_text().strip().replace('\u00a0', ' ').replace('_','-')
+
+    # Create folder
+    folder_name = prj_title + "_images"
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+    else:
+        delete_files(folder_name)
     
     # Loop through each frame and extract the data
     for frame in targets:
@@ -54,30 +62,33 @@ def process_pages(url, targets, context: BrowserContext):
         loading_thread = threading.Thread(target=loading_screen, args=(frame, stop_loading))
         loading_thread.start() # Start the loading screen
 
-        page = context.new_page()
+        #page = context.new_page()
         try:
-            page_data = ActivateBot(url, frame, page)
+            page_data = ActivateBot(url, frame, page, folder_name, prj_title)
             all_page_data.append(page_data)
         except Exception as e:
             # This is added to ensure that the loading screen stops and the thread is joined before the program exits
-            page.close()
+            #page.close()
             stop_loading.set() # Stop the loading screen
             loading_thread.join() # Wait for the loading screen to finish
             raise Exception("Error 00:",str(e))
 
-        page.close()
+        #page.close()
         stop_loading.set() # Stop the loading screen
         loading_thread.join() # Wait for the loading screen to finish
 
+    page.close()
     website_data = {
         "project title": prj_title,
         "data": all_page_data
     }
 
-    return website_data, prj_title
+    return website_data, prj_title, folder_name
+
+
 
 # playwrite bot for each page
-def ActivateBot(url, chosen_frame, page: Page):
+def ActivateBot(url, chosen_frame, page: Page, folder_name, prj_title):
     tldraw_menu_list = '.tlui-page-menu__list'
     tldraw_menu_item = '.tlui-page-menu__item'
 
@@ -105,9 +116,10 @@ def ActivateBot(url, chosen_frame, page: Page):
     except Exception as e:
         raise Exception("Error 01: " + str(e)) 
 
-    page_data = ExtractData(chosen_frame, json_content)
+    page_data = ExtractData(chosen_frame, json_content, folder_name, prj_title)
 
     return page_data
+
 
 
 # Loop through the dropdown menu and click the target page
@@ -120,8 +132,9 @@ def Dropdown_Checker(chosen_frame, menu):
     return False
 
 
+
 # Extract the necessary data from the JSON
-def ExtractData(chosen_frame: str, content: json):
+def ExtractData(chosen_frame: str, content: json, folder_name, prj_title):
     frame_id = ''
     desc = ''
     date = ''
@@ -161,16 +174,18 @@ def ExtractData(chosen_frame: str, content: json):
         date = date.strip()
     else:
         raise Exception("Error 03: No description and date found. Ensure that the description is in the format '<description>::<date>'.")
+    
 
     # Get the student data
-    students = get_student_data(content['shapes'], frame_id, content['assets'])
+    students = get_student_data(content['shapes'], frame_id, content['assets'], folder_name, date, prj_title, chosen_frame)
     page_data = {
-        'name': chosen_frame,
+        'page': chosen_frame,
         'date': date,
         'description': desc,
-        'data': students
+        'students': students
     } 
     return page_data
+
 
 
 # Get the main information of the frame
@@ -183,62 +198,76 @@ def get_Frame_Desc(shapes, frame_id):
             frame_desc = shape['props']['text']
     return frame_desc
 
-# Get student data
-def get_student_data(shapes, frame_id, assets,name=None):  
-    student_data = {}
-    student_imgs = []
+
+
+# Get student data recursively by assuming that the student's image is always in the frame and that frame has the student name
+def get_student_data(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, name=None):  
+    student_names = set() # Only keep unique names
+    has_student_imgs = False
     for shape in shapes:
         # Stops here when an image is found and returns the student data
         if shape['parentId'] == frame_id and shape['type'] == 'image':
-            img = get_student_img(shape['props']['assetId'], assets)
-            student_imgs.append(img)
+            get_student_img(shape['props']['assetId'], assets, folder_name, name, date, prj_title, chosen_frame)
+            has_student_imgs = True
             
         # Perform a recursive call if its a frame 
         if shape['parentId'] == frame_id and shape['type'] == 'frame':
             name = shape['props']['name']
-            student_data.update(get_student_data(shapes, shape['id'],assets, name))
+            student_names.update(get_student_data(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
 
             name = None # Reset the name to None after the recursive call
 
         # Check if the student is in a group if so, get the grp id and perform a recursive call
         if shape['parentId'] == frame_id and shape['type'] == 'group':
-            student_data.update(get_student_data(shapes, shape['id'],assets, name))
+            student_names.update(get_student_data(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
 
 
-    if name is not None:
-        student = {
-            'image': student_imgs
-        }
+    if name is not None and has_student_imgs:
+        student_names.add(name)
 
-        # Ensuring that the student_data is not overwritten by duplicate names by checking dictionary keys
-        if name in student_data:
-            # Append the images to the existing student data
-            student_data[name]['image'].extend(student_imgs)
-        else:
-            student_data[name] = student
-    return student_data
+    return list(student_names)
 
 
-
-
-def get_student_img(asset_id, assets):
-    def convert_img_to_base64_str(img_url):
+# Get the student image
+def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title, chosen_frame):
+    def img_resize_and_save(img_url):
+        
         response = requests.get(img_url)
         if response.status_code == 200:
-            # Convert image to base64 and then decode it to a string.
-            # ----Will need to encode it back to bytes when saving it to a file----
-            base64_img = base64.b64encode(response.content).decode('utf-8')
-            return base64_img
+            # Resize the image if it exceeds the max resolution
+            try:
+                Image.MAX_IMAGE_PIXELS = None
+                img = Image.open(io.BytesIO(response.content))
+                if img.mode != 'RGBA':
+                    img = img.convert('RGBA')
+                img_reso = img.width * img.height
+                max_reso = 4096
+
+                if img_reso > max_reso:
+                    scale_factor = (max_reso/img_reso) ** 0.5 # Resize by the square root of the scale factor
+                    new_width = int(img.width * scale_factor)
+                    new_height = int(img.height * scale_factor)
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS) # Smooth the img
+
+                # Save Image
+                uniqueid = 1
+                img_name = ""
+                while img_name == "" or os.path.exists(save_path):
+                    img_name = prj_title + "___" + chosen_frame + "___" + date + "___" + student_name + "___" + str(uniqueid) + ".png"
+                    save_path = os.path.join(folder_name, img_name)
+                    uniqueid+=1
+                img.save(save_path, format='PNG')
+                
+            except Exception as e:
+                raise Exception("Error 04:", str(e))
         else:
-            return ""
+            raise Exception("Error 04: Image not found. Exiting program.")
 
     for asset in assets:
         # Get the student image
         if asset_id == asset['id']:
-            base64_img = convert_img_to_base64_str(
-                asset['props']['src'])
-            return base64_img
-
+            img = asset['props']['src']
+            img_resize_and_save(img)
 
 
 
@@ -267,6 +296,17 @@ def loading_screen(curr_frame, stop_loading):
     print("\n" + curr_frame + " completed.")
 
 
+
+def delete_files(folder_name):
+    for filename in os.listdir(folder_name):
+        file_path = os.path.join(folder_name, filename)
+        try:
+            os.unlink(file_path)
+        except Exception as e:
+            raise Exception(f"Error 06: Failed to delete '{file_path}' because '{e}'")
+
+
+
 # Save the data to a json file
 def save_data(data, prj_title):
     try:
@@ -274,6 +314,8 @@ def save_data(data, prj_title):
             json.dump(data, file, indent=4)
     except Exception as e:
         raise Exception("Error 05:", str(e))
+
+
 
 # -----------------End of Functions-----------------#
 
@@ -312,6 +354,7 @@ if (len(targets) == 0):
 # Where all the magic happens
 with sync_playwright() as p:
     prj_title = ''
+    folder_name = ''
     complete_data = None
     browser = p.chromium.launch(headless=True)
     context = browser.new_context(
@@ -323,7 +366,7 @@ with sync_playwright() as p:
         targets = get_all_pages(url, page)
         page.close()
     try:
-        complete_data, prj_title = process_pages(url, targets, context)
+        complete_data, prj_title, folder_name = process_pages(url, targets, context)
         save_data(complete_data, prj_title)
     except Exception as e:
         print(Fore.YELLOW + str(e) + Fore.RESET)
@@ -331,5 +374,5 @@ with sync_playwright() as p:
     
     context.close()
     browser.close()
-    print(Fore.GREEN + f"Data successfully extracted and saved as '{prj_title}.json'." + Fore.RESET)
+    print(Fore.GREEN + f"Data successfully extracted and saved at '{prj_title}.json' and '{folder_name}' folder" + Fore.RESET)
 # -----------------End of Main Program-----------------#

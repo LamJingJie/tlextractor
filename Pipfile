@@ -7,6 +7,7 @@ name = "pypi"
 lxml-html-clean = "*"
 pytest-playwright = "*"
 playwright = "*"
+pillow = "*"
 
 [dev-packages]
 
