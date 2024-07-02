@@ -9,24 +9,22 @@ from PIL import Image
 import io
 import os
 
-# Data Structure
-'''[
-    {
-        "name": "benchmark 01",
-        "date": "DUE 26 MAY (SUNDAY) 2359",
-        "description": "First iteration of site in blender/rhino",
-        "data": [
-            {
-                "Jia Wei": 
-                    {
-                        "image": [
-                                    "base64_img", "base64_img"
-                                 ]
-                    },
-            }
-        ]
-    }
-]'''
+# Data Structure Example:
+# {
+#     "project title": "CORE STUDIO 02-24-TEST",
+#     "data": [
+#         {
+#             "page": "benchmark 01",
+#             "date": "DUE 26 MAY (SUNDAY) 2359",
+#             "description": "First iteration of site in blender/rhino",
+#             "students": [
+#                 "sean hung xiang hui",
+#                 "ooi zher xian",
+#                 "kiatkongchayin akrapong"
+#             ]
+#         }
+#     ]
+# }
 
 # Example: https://www.tldraw.com/r/fOZmgi9MQzQc-rrXnpAz6?v=-167,-196,5343,2630&p=HGtpLC0ipiTvgK6awql7m
 
@@ -234,20 +232,28 @@ def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title
         
         response = requests.get(img_url)
         if response.status_code == 200:
-            # Resize the image if it exceeds the max resolution
+            # Resize the image if it exceeds the max resolution on either x or y axis
             try:
                 Image.MAX_IMAGE_PIXELS = None
                 img = Image.open(io.BytesIO(response.content))
                 if img.mode != 'RGBA':
                     img = img.convert('RGBA')
-                img_reso = img.width * img.height
-                max_reso = 4096
 
-                if img_reso > max_reso:
-                    scale_factor = (max_reso/img_reso) ** 0.5 # Resize by the square root of the scale factor
-                    new_width = int(img.width * scale_factor)
-                    new_height = int(img.height * scale_factor)
-                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS) # Smooth the img
+                max_reso_x_y = 4096
+
+                if img.width > max_reso_x_y:
+                    new_width = max_reso_x_y
+                    img = img.resize((new_width, img.height), Image.Resampling.LANCZOS) # Smooth the img
+                
+                if img.height > max_reso_x_y:
+                    new_height = max_reso_x_y
+                    img = img.resize((img.width, new_height), Image.Resampling.LANCZOS) # Smooth the img
+                
+                # if img_reso > max_reso_x_y:
+                #     scale_factor = (max_reso_x_y/img_reso) ** 0.5 # Resize by the square root of the scale factor
+                #     new_width = int(img.width * scale_factor)
+                #     new_height = int(img.height * scale_factor)
+                #     img = img.resize((new_width, new_height), Image.Resampling.LANCZOS) # Smooth the img
 
                 # Save Image
                 uniqueid = 1
