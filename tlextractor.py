@@ -7,6 +7,7 @@ import sys
 import time
 from PIL import Image
 import io
+import base64
 import os
 
 # Data Structure Example:
@@ -41,11 +42,16 @@ def process_pages(url, targets, context: BrowserContext):
     all_page_data = []
 
     # Get project title
-    page = context.new_page()
+    page = context.new_page() 
     page.goto(url)
-    page.wait_for_selector(".tlui-popover")
+    page.wait_for_selector(".tlui-popover", state='visible')
     page.click(".tlui-button__menu")
-    prj_title = page.query_selector(".tlui-top-zone__container").inner_text().strip().replace('\u00a0', ' ').replace('_','-')
+    # Try to get the project title, if not found, set it to "Untitled Project"
+    try:
+        prj_title = page.query_selector(".tlui-top-zone__container").inner_text().strip().replace('\u00a0', ' ').replace('_','-')
+    except AttributeError:
+        print(Fore.LIGHTCYAN_EX + "Project title not found. Setting it to 'Untitled Project'." + Fore.RESET)
+        prj_title = "Untitled Project"
 
     # Create folder
     folder_name = prj_title + "_images"
@@ -59,19 +65,15 @@ def process_pages(url, targets, context: BrowserContext):
         stop_loading = threading.Event()
         loading_thread = threading.Thread(target=loading_screen, args=(frame, stop_loading))
         loading_thread.start() # Start the loading screen
-
-        #page = context.new_page()
         try:
             page_data = ActivateBot(url, frame, page, folder_name, prj_title)
             all_page_data.append(page_data)
         except Exception as e:
             # This is added to ensure that the loading screen stops and the thread is joined before the program exits
-            #page.close()
-            stop_loading.set() # Stop the loading screen
-            loading_thread.join() # Wait for the loading screen to finish
+            stop_loading.set()
+            loading_thread.join()
             raise Exception("Error 00:",str(e))
 
-        #page.close()
         stop_loading.set() # Stop the loading screen
         loading_thread.join() # Wait for the loading screen to finish
 
@@ -112,7 +114,7 @@ def ActivateBot(url, chosen_frame, page: Page, folder_name, prj_title):
         json_content = json.loads(clipboard_content)
 
     except Exception as e:
-        raise Exception("Error 01: " + str(e)) 
+        raise Exception("Error 01: " + str(e))
 
     page_data = ExtractData(chosen_frame, json_content, folder_name, prj_title)
 
@@ -136,27 +138,38 @@ def ExtractData(chosen_frame: str, content: json, folder_name, prj_title):
     frame_id = ''
     desc = ''
     date = ''
+    isCustomTemplatePresent = False
 
-    # Leave only the necessary shapes (images, text with names, groups and frames with names)
-    content['shapes'] = [shape_data for shape_data in content['shapes'] if (shape_data['type'] == 'frame' and shape_data['props'].get('name', '').strip() != '') or
-                         shape_data['type'] == 'image' or
-                         (shape_data['type'] == 'text' and shape_data['props'].get('text', '').strip() != '') or
-                         shape_data['type'] == 'group']
+    # Leave only the necessary shapes (images, text with names, groups and frames with names, submission frame template)
+    content['shapes'] = [shape_data for shape_data in content['shapes'] 
+                         if (shape_data['type'] == 'frame' and 
+                            shape_data['props'].get('name', '').strip() != '') or
+                            shape_data['type'] == 'image' or
+                            (shape_data['type'] == 'text' and shape_data['props'].get('text', '').strip() != '') or
+                            shape_data['type'] == 'group' or
+                            shape_data['type'] == 'submission_frame'
+                        ]
+    
 
     # Get the frame id: Still Big(O) = N but half the iteration using 2 pointer
     start_pointer = 0
     end_pointer = len(content['shapes']) - 1
-    while start_pointer < end_pointer:
+    while start_pointer <= end_pointer:
         start_shape = content['shapes'][start_pointer]
         end_shape = content['shapes'][end_pointer]
+
+        # Check if the custom template is present
+        if start_shape['type'] == 'submission_frame':
+            isCustomTemplatePresent = True
+        elif end_shape['type'] == 'submission_frame':
+            isCustomTemplatePresent = True
 
         # Get frame where all the data is stored and check if the frame is the chosen frame
         if start_shape['type'] == 'frame' and chosen_frame == start_shape['props']['name'].lower().strip() and start_shape['parentId'].startswith('page:'):
             frame_id = content['shapes'][start_pointer]['id']
-            break
         elif end_shape['type'] == 'frame' and chosen_frame == end_shape['props']['name'].lower().strip() and end_shape['parentId'].startswith('page:'):
             frame_id = content['shapes'][end_pointer]['id']
-            break
+            
         start_pointer += 1
         end_pointer -= 1
 
@@ -169,13 +182,22 @@ def ExtractData(chosen_frame: str, content: json, folder_name, prj_title):
     if "::" in frame_desc:
         desc, date = frame_desc.split("::")
         desc = desc.strip()
-        date = date.strip()
+        date = date.strip().replace('<', '').replace('>', '')
     else:
-        raise Exception("Error 03: No description and date found. Ensure that the description is in the format '<description>::<date>'.")
+        desc = 'desc'
+        date = 'date'
+        print(Fore.LIGHTCYAN_EX + "No description and date found. Setting it to default value. Ensure that the description is in the format '<description>::<date>'." + Fore.RESET)
+        #raise Exception("Error 03: No description and date found. Ensure that the description is in the format '<description>::<date>'.")
     
 
-    # Get the student data
-    students = get_student_data(content['shapes'], frame_id, content['assets'], folder_name, date, prj_title, chosen_frame)
+    # Use different methods depending on the custom template presence
+    # Only students that have submitted will be included
+    if(isCustomTemplatePresent):
+        students = get_student_data_method2(content['shapes'], frame_id, content['assets'], folder_name, date, prj_title, chosen_frame)
+    else:
+        students = get_student_data_method1(content['shapes'], frame_id, content['assets'], folder_name, date, prj_title, chosen_frame)
+
+    
     page_data = {
         'page': chosen_frame,
         'date': date,
@@ -199,25 +221,28 @@ def get_Frame_Desc(shapes, frame_id):
 
 
 # Get student data recursively by assuming that the student's image is always in the frame and that frame has the student name
-def get_student_data(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, name=None):  
+# Utilizing DFS algorithm
+# Method 1: No custom template
+def get_student_data_method1(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, name=None):  
     student_names = set() # Only keep unique names
     has_student_imgs = False
     for shape in shapes:
+
         # Stops here when an image is found and returns the student data
-        if shape['parentId'] == frame_id and shape['type'] == 'image':
+        if shape['parentId'] == frame_id and shape['type'] == 'image' and name is not None:
             get_student_img(shape['props']['assetId'], assets, folder_name, name, date, prj_title, chosen_frame)
             has_student_imgs = True
             
         # Perform a recursive call if its a frame 
         if shape['parentId'] == frame_id and shape['type'] == 'frame':
-            name = shape['props']['name']
-            student_names.update(get_student_data(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
+            name = shape['props']['name'].strip().replace('<', '').replace('>', '')
+            student_names.update(get_student_data_method1(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
 
             name = None # Reset the name to None after the recursive call
 
         # Check if the student is in a group if so, get the grp id and perform a recursive call
         if shape['parentId'] == frame_id and shape['type'] == 'group':
-            student_names.update(get_student_data(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
+            student_names.update(get_student_data_method1(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
 
 
     if name is not None and has_student_imgs:
@@ -226,53 +251,93 @@ def get_student_data(shapes, frame_id, assets, folder_name, date, prj_title, cho
     return list(student_names)
 
 
-# Get the student image
-def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title, chosen_frame):
-    def img_resize_and_save(img_url):
+# Get student data, if any frame or group perform recursion until it reaches the custom template type
+# Utilizing DFS algorithm
+# Method 2: Custom template
+def get_student_data_method2(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, name = None):
+    student_names = set() # Only keep unique names
+    has_student_imgs = False
+    for shape in shapes:
+        # Stops here when an image is found and its inside the submission_frame
+        if shape['parentId'] == frame_id and shape['type'] == 'image' and name is not None:
+            get_student_img(shape['props']['assetId'], assets, folder_name, name, date, prj_title, chosen_frame)
+            has_student_imgs = True
+
+        # Perform a recursive call and send over the student name
+        if shape['type'] == 'submission_frame' and shape['parentId'] == frame_id:
+            name = shape['props']['name'].strip().replace('<', '').replace('>', '')
+            student_names.update(get_student_data_method2(shapes, shape['id'], assets, folder_name, date, prj_title, chosen_frame, name))
+
+            name = None
         
-        response = requests.get(img_url)
-        if response.status_code == 200:
-            # Resize the image if it exceeds the max resolution on either x or y axis
-            try:
-                Image.MAX_IMAGE_PIXELS = None
-                img = Image.open(io.BytesIO(response.content))
-                if img.mode != 'RGBA':
-                    img = img.convert('RGBA')
+        if (shape['type'] == 'group' or shape['type'] == 'frame') and shape['parentId'] == frame_id:
+            # Perform a recursive call if its a group or frame, each time going deeper
+            student_names.update(get_student_data_method2(shapes, shape['id'], assets, folder_name, date, prj_title, chosen_frame, name))
+    
+    if name is not None and has_student_imgs:
+        student_names.add(name)
 
-                max_reso_x_y = 4096
+    return list(student_names)
 
-                if img.width > max_reso_x_y:
-                    new_width = max_reso_x_y
-                    img = img.resize((new_width, img.height), Image.Resampling.LANCZOS) # Smooth the img
-                
-                if img.height > max_reso_x_y:
-                    new_height = max_reso_x_y
-                    img = img.resize((img.width, new_height), Image.Resampling.LANCZOS) # Smooth the img
-                
-                # if img_reso > max_reso_x_y:
-                #     scale_factor = (max_reso_x_y/img_reso) ** 0.5 # Resize by the square root of the scale factor
-                #     new_width = int(img.width * scale_factor)
-                #     new_height = int(img.height * scale_factor)
-                #     img = img.resize((new_width, new_height), Image.Resampling.LANCZOS) # Smooth the img
+    
 
-                # Save Image
-                uniqueid = 1
-                img_name = ""
-                while img_name == "" or os.path.exists(save_path):
-                    img_name = prj_title + "___" + chosen_frame + "___" + date + "___" + student_name + "___" + str(uniqueid) + ".png"
-                    save_path = os.path.join(folder_name, img_name)
-                    uniqueid+=1
-                img.save(save_path, format='PNG')
-                
-            except Exception as e:
-                raise Exception("Error 04:", str(e))
+
+# Get the student image and save it in a seperate folder
+def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title, chosen_frame):
+
+    # Resize img and save it in seperate folder
+    def img_resize_and_save(img_url):
+        Image.MAX_IMAGE_PIXELS = None
+
+        # Check if the image is a base64 image rather than a url
+        if(img_url.startswith('data:image') and img_url.find('base64,')):
+            base64_index = img_url.find('base64,') + len('base64,')
+            # Decode everything after the base64, to get the image data
+            image_data = base64.b64decode(img_url[base64_index:])
+            img = Image.open(io.BytesIO(image_data))
         else:
-            raise Exception("Error 04: Image not found. Exiting program.")
+            response = requests.get(img_url)
+            if response.status_code == 200:
+                img = Image.open(io.BytesIO(response.content))
+            else:
+                raise Exception("Error 04: Image not found. Exiting program.")
+
+        # Resize the image if it exceeds the max resolution on either x or y axis
+        try:
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+
+            max_reso_x_y = 4096
+
+            if img.width > max_reso_x_y:
+                new_width = max_reso_x_y
+                img = img.resize((new_width, img.height),
+                               Image.Resampling.LANCZOS)  # Smooth the img
+
+            if img.height > max_reso_x_y:
+                new_height = max_reso_x_y
+                img = img.resize((img.width, new_height),
+                                 Image.Resampling.LANCZOS)  # Smooth the img
+
+            # Save Image with incremental unique id, prevent overwriting
+            uniqueid = 1
+            img_name = ""
+            while img_name == "" or os.path.exists(save_path):
+                img_name = prj_title + "___" + chosen_frame + "___" + date + \
+                        "___" + student_name + "___" + str(uniqueid) + ".png"
+                save_path = os.path.join(folder_name, img_name)
+                uniqueid += 1
+
+            img.save(save_path, format='PNG') #Err here
+
+        except Exception as e:
+            raise Exception("Error 04:", str(e))
+
 
     for asset in assets:
         # Get the student image
         if asset_id == asset['id']:
-            img = asset['props']['src']
+            img = asset['props']['src']           
             img_resize_and_save(img)
 
 
@@ -296,7 +361,7 @@ def loading_screen(curr_frame, stop_loading):
     while not stop_loading.is_set():
         sys.stdout.write("\r" + f'Extracting {curr_frame}...' + animation[i % len(animation)]) # Ensure index always within the range of the animation
         sys.stdout.flush()
-        time.sleep(0.2)
+        time.sleep(0.15)
         i += 1
     
     print("\n" + curr_frame + " completed.")
@@ -365,7 +430,8 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     context = browser.new_context(
                                 # Add clipboard permissions
-                                permissions=["clipboard-read", "clipboard-write"])
+                                permissions=["clipboard-read", "clipboard-write"],
+                                )
     if (targets[0] == "all"):
         # Extract all data, otherwise loop and extract each frame
         page = context.new_page()
@@ -375,10 +441,10 @@ with sync_playwright() as p:
         complete_data, prj_title, folder_name = process_pages(url, targets, context)
         save_data(complete_data, prj_title)
     except Exception as e:
-        print(Fore.YELLOW + str(e) + Fore.RESET)
+        print(Fore.LIGHTYELLOW_EX + str(e) + Fore.RESET)
         exit()
     
     context.close()
     browser.close()
-    print(Fore.GREEN + f"Data successfully extracted and saved at '{prj_title}.json' and '{folder_name}' folder" + Fore.RESET)
+    print(Fore.LIGHTGREEN_EX + f"Data successfully extracted and saved at '{prj_title}.json' and '{folder_name}' folder" + Fore.RESET)
 # -----------------End of Main Program-----------------#
