@@ -1,5 +1,5 @@
 from colorama import Fore
-from playwright.sync_api import sync_playwright, Page, BrowserContext
+from playwright.sync_api import sync_playwright, Page, BrowserContext, Browser
 import json
 import requests
 import threading
@@ -9,6 +9,7 @@ from PIL import Image
 import io
 import base64
 import os
+import shutil
 
 # Data Structure Example:
 # {
@@ -29,29 +30,38 @@ import os
 
 # Example: https://www.tldraw.com/r/fOZmgi9MQzQc-rrXnpAz6?v=-167,-196,5343,2630&p=HGtpLC0ipiTvgK6awql7m
 
+# TASKS:
+# Use Threading first when initializing pages
+# afterwards, use multi-processing for each of the images in their respective pages (ensure each image has unique name)
+
 #Video
 '''
 https://github.com/LamJingJie/tlextractor/assets/58838335/8ea12541-120f-4b0e-8577-770f6d90232a
 '''
 
 # -----------------Functions-----------------#
+# Global Variable
+all_page_data = []
+data_lock = threading.Lock()
+console_lock = threading.Lock()
 
 # Process pages chosen by the user
 def process_pages(url, targets, context: BrowserContext):
     prj_title = ''
-    all_page_data = []
+    pages_threads = []
 
     # Get project title
     page = context.new_page() 
     page.goto(url)
     page.wait_for_selector(".tlui-popover", state='visible')
-    page.click(".tlui-button__menu")
+
     # Try to get the project title, if not found, set it to "Untitled Project"
     try:
-        prj_title = page.query_selector(".tlui-top-zone__container").inner_text().strip().replace('\u00a0', ' ').replace('_','-')
-    except AttributeError:
+        prj_title = page.query_selector(".tlui-top-panel__container").inner_text().strip().replace('\u00a0', ' ').replace('_','-')
+    except AttributeError as a:
         print(Fore.LIGHTCYAN_EX + "Project title not found. Setting it to 'Untitled Project'." + Fore.RESET)
         prj_title = "Untitled Project"
+    page.close()
 
     # Create folder
     folder_name = prj_title + "_images"
@@ -60,24 +70,25 @@ def process_pages(url, targets, context: BrowserContext):
     else:
         delete_files(folder_name)
     
+ 
     # Loop through each frame and extract the data
+    # Get the thread ready and after all has been initialized, start executing the threads. Order determined by OS
+    rows = 0
+    print("Extracting data from the following pages:")
     for frame in targets:
-        stop_loading = threading.Event()
-        loading_thread = threading.Thread(target=loading_screen, args=(frame, stop_loading))
-        loading_thread.start() # Start the loading screen
-        try:
-            page_data = ActivateBot(url, frame, page, folder_name, prj_title)
-            all_page_data.append(page_data)
-        except Exception as e:
-            # This is added to ensure that the loading screen stops and the thread is joined before the program exits
-            stop_loading.set()
-            loading_thread.join()
-            raise Exception("Error 00:",str(e))
+        rows+=1
+        individual_page_thread = threading.Thread(target=run_individual_page, args=(rows + 2, url, frame, folder_name, prj_title))
+        individual_page_thread.start()
+        pages_threads.append(individual_page_thread)
+        
 
-        stop_loading.set() # Stop the loading screen
-        loading_thread.join() # Wait for the loading screen to finish
-
-    page.close()
+    # Wait for all threads to finish
+    for thread in pages_threads:
+        thread.join()
+    
+    # Move to right below the threads
+    move_cursor(len(targets) + 5, 1)
+    
     website_data = {
         "project title": prj_title,
         "data": all_page_data
@@ -86,32 +97,64 @@ def process_pages(url, targets, context: BrowserContext):
     return website_data, prj_title, folder_name
 
 
-
-# playwrite bot for each page
-def ActivateBot(url, chosen_frame, page: Page, folder_name, prj_title):
-    tldraw_menu_list = '.tlui-page-menu__list'
-    tldraw_menu_item = '.tlui-page-menu__item'
+# Utilize threading to extract data from each page
+def run_individual_page(row, url, frame, folder_name, prj_title):
+    stop_loading_success = threading.Event()
+    stop_loading_failure = threading.Event()
+    loading_thread = threading.Thread(target=loading_screen, args=(row, frame, stop_loading_success, stop_loading_failure))
+    loading_thread.start()  # Start the loading screen
 
     try:
-        page.goto(url)
-        page.wait_for_selector(".tlui-popover")
-        page.click(".tlui-button__menu")
+        page_data = ActivateBot(url, frame, folder_name, prj_title)
+        # Lock the data to prevent race conditions and data corruption by multiple threads
+        with data_lock:
+            all_page_data.append(page_data)
 
-        page.wait_for_selector(tldraw_menu_list)
-        dropdown_menu = page.query_selector_all(tldraw_menu_item)
+    except Exception as e:
+        # This is added to ensure that the loading screen stops and the thread is joined before the program exits
+        stop_loading_failure.set()
+        loading_thread.join()
+        raise Exception("Error 00:", str(e))
 
-        if (not Dropdown_Checker(chosen_frame, dropdown_menu)):
-            raise Exception("Page not found. Exiting program.")
+    stop_loading_success.set()  # Stop the loading screen
+    # Wait for the loading screen to finish before going to the next frame/page
+    loading_thread.join()
 
-        page.wait_for_load_state('load')
+    
 
-        # Click menu btn and copy as json
-        page.click("[data-testid = 'main-menu.button']")
-        page.click("[data-testid = 'main-menu-sub.edit-button']")
-        page.click("[data-testid='main-menu-sub.copy as-button']")
-        page.click("[data-testid='main-menu.copy-as-json']")
-        clipboard_content = page.evaluate("navigator.clipboard.readText()")
-        json_content = json.loads(clipboard_content)
+# playwrite bot for opening of each page
+def ActivateBot(url, chosen_frame, folder_name, prj_title):
+    tldraw_menu_list = '.tlui-page-menu__list'
+    tldraw_menu_item = '.tlui-page-menu__item'
+    try:
+        # Ensure that each thread creates a new page to prevent errs
+        with sync_playwright() as p:
+        
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                                    # Add clipboard permissions
+                                    permissions=["clipboard-read", "clipboard-write"],
+                                    )
+            page = context.new_page()
+            page.goto(url)
+            page.wait_for_selector(".tlui-popover")
+            page.click(".tlui-button__menu")
+
+            page.wait_for_selector(tldraw_menu_list)
+            dropdown_menu = page.query_selector_all(tldraw_menu_item)
+
+            if (not Dropdown_Checker(chosen_frame, dropdown_menu)):
+                raise Exception("Page not found. Exiting program.")
+
+            page.wait_for_load_state('load')
+
+            # Click menu btn and copy as json
+            page.click("[data-testid = 'main-menu.button']")
+            page.click("[data-testid = 'main-menu-sub.edit-button']")
+            page.click("[data-testid='main-menu-sub.copy as-button']")
+            page.click("[data-testid='main-menu.copy-as-json']")
+            clipboard_content = page.evaluate("navigator.clipboard.readText()")
+            json_content = json.loads(clipboard_content)
 
     except Exception as e:
         raise Exception("Error 01: " + str(e))
@@ -322,6 +365,7 @@ def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title
             # Save Image with incremental unique id, prevent overwriting
             uniqueid = 1
             img_name = ""
+            #process_id = current_process().pid
             while img_name == "" or os.path.exists(save_path):
                 img_name = prj_title + "___" + chosen_frame + "___" + date + \
                         "___" + student_name + "___" + str(uniqueid) + ".png"
@@ -342,6 +386,7 @@ def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title
 
 
 
+
 def get_all_pages(url, page: Page):
     # Take from menu dropdown list
     page_list = []
@@ -354,17 +399,44 @@ def get_all_pages(url, page: Page):
 
 
 
-def loading_screen(curr_frame, stop_loading):
-    animation = "|/-\\"
-    i = 0
+# Move the cursor to the specified row and column in the terminal
+def move_cursor(row, col):
+    sys.stdout.write(f"\033[{row};{col}H")
+
+
+
+# Clear the terminal screen
+def clear_screen():
+    sys.stdout.write("\033[2J")
+    sys.stdout.flush()
+
+
+def loading_screen(row, curr_frame, stop_loading_success, stop_loading_failure):
+    line_length = 10
+    position = 0
+
     # While the loading screen is not set (stopped), keep printing the loading screen
-    while not stop_loading.is_set():
-        sys.stdout.write("\r" + f'Extracting {curr_frame}...' + animation[i % len(animation)]) # Ensure index always within the range of the animation
-        sys.stdout.flush()
-        time.sleep(0.15)
-        i += 1
+    while not stop_loading_success.is_set() and not stop_loading_failure.is_set():
+        line = ['.' for _ in range(line_length)]
+        line[position % line_length] = '|'
+        line = "".join(line)
+
+        # Prevent overlapping the loading screen with other threads, making sure that row is dedicated to 1 thread
+        with console_lock:
+            move_cursor(row, 1)
+            sys.stdout.write("\r" + f'Extracting {curr_frame}' + line) # Ensure index always within the range of the animation
+            sys.stdout.flush()
+        time.sleep(0.1)
+        position += 1
     
-    print("\n" + curr_frame + " completed.")
+
+    with console_lock:  
+        # Move the cursor to the same row and override the loading screen with final msg
+        move_cursor(row, 1)
+        if(stop_loading_failure.is_set()):
+            sys.stdout.write(Fore.LIGHTRED_EX + "\r" + curr_frame + " failed. Exiting program." + Fore.RESET)
+        else:
+            sys.stdout.write(Fore.LIGHTGREEN_EX + "\r" + curr_frame + " extracted successfully." + Fore.RESET)
 
 
 
@@ -387,64 +459,71 @@ def save_data(data, prj_title):
         raise Exception("Error 05:", str(e))
 
 
-
 # -----------------End of Functions-----------------#
 
 
 # -----------------Main Program-----------------#
-url = str()
-targets = []
-
-while url == "":
-    url = input("Tldraw project url: ")
-
-
-print(Fore.LIGHTMAGENTA_EX +
-      "\nType 'ALL' to extract all frames. Otherwise, enter the frame(s) you want to extract." + Fore.RESET)
-while True:
-    val = input(Fore.LIGHTMAGENTA_EX + "\nWhen finished type 'DONE'.\n:: " + Fore.RESET).lower().strip()
-
-    # Check if the user wants to extract all frames
-    if (len(targets) == 0 and val == "all"):
-        targets.append(val)
-        break
-
-    # Check if the user wants to stop entering frames
-    if (val == "done"):
-        break
-
-    # Check if the user entered a value
-    if (val != ""):
-        targets.append(val)
-
-
-if (len(targets) == 0):
-    print(Fore.YELLOW + "No frames selected. Exiting program." + Fore.RESET)
-    exit()
-
-# Where all the magic happens
-with sync_playwright() as p:
-    prj_title = ''
-    folder_name = ''
-    complete_data = None
-    browser = p.chromium.launch(headless=True)
-    context = browser.new_context(
-                                # Add clipboard permissions
-                                permissions=["clipboard-read", "clipboard-write"],
-                                )
-    if (targets[0] == "all"):
-        # Extract all data, otherwise loop and extract each frame
-        page = context.new_page()
-        targets = get_all_pages(url, page)
-        page.close()
-    try:
-        complete_data, prj_title, folder_name = process_pages(url, targets, context)
-        save_data(complete_data, prj_title)
-    except Exception as e:
-        print(Fore.LIGHTYELLOW_EX + str(e) + Fore.RESET)
-        exit()
+def main(targets):
+    # Where all the magic happens
+    with sync_playwright() as p:
+        prj_title = ''
+        folder_name = ''
+        complete_data = None
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+                                    # Add clipboard permissions
+                                    permissions=["clipboard-read", "clipboard-write"],
+                                    )
+        if (targets[0] == "all"):
+            # Extract all data, otherwise loop and extract each frame
+            page = context.new_page()
+            targets = get_all_pages(url, page)
+            page.close()
+        try:
+            complete_data, prj_title, folder_name = process_pages(url, targets, context)
+            save_data(complete_data, prj_title)
+        except Exception as e:
+            print("\n" + Fore.LIGHTYELLOW_EX + str(e) + Fore.RESET + "\n")
+            exit()
     
-    context.close()
-    browser.close()
-    print(Fore.LIGHTGREEN_EX + f"Data successfully extracted and saved at '{prj_title}.json' and '{folder_name}' folder" + Fore.RESET)
+        context.close()
+        browser.close()
+        print(Fore.LIGHTGREEN_EX + f"Data successfully extracted and saved at '{prj_title}.json' and '{folder_name}' folder" + Fore.RESET)
+
+
+
+if __name__ == "__main__":
+    url = str()
+    targets = []
+
+    while url == "":
+        url = input("Tldraw project url: ")
+
+
+    print(Fore.LIGHTMAGENTA_EX +
+          "\nType 'ALL' to extract all frames. Otherwise, enter the frame(s) you want to extract." + Fore.RESET)
+    while True:
+        val = input(Fore.LIGHTMAGENTA_EX + "\nWhen finished type 'DONE'.\n:: " + Fore.RESET).lower().strip()
+
+        # Check if the user wants to extract all frames
+        if (len(targets) == 0 and val == "all"):
+            targets.append(val)
+            break
+
+        # Check if the user wants to stop entering frames
+        if (val == "done"):
+            break
+
+        # Check if the user entered a value
+        if (val != ""):
+            targets.append(val)
+
+    if (len(targets) == 0):
+        print(Fore.LIGHTYELLOW_EX + "No frames selected. Exiting program." + Fore.RESET)
+        exit()
+    clear_screen()
+    move_cursor(1, 1)
+    main(targets)
+    
+        
 # -----------------End of Main Program-----------------#

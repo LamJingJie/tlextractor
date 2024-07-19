@@ -5,6 +5,8 @@ TLExtractor is a Python script designed to extract specific data from tldraw pag
 For more information on the **custom submission template**, visit:
 [Custom Submission Template](https://github.com/LamJingJie/tldraw/tree/dynamic_submission_template/templates/vite)
 
+TLExtractor leverages Depth-first search for data searching and saving. It employs Multi-Threading to open multiple threads of pages and utilizes Playwright to then extract data respectively. Multi-Processing is used for multiple images processing, especially when there are a lot of images that need processing. Multi-Processing is nested inside Multi-Threading as the start is more I/O intensive and the end is more CPU intensive.
+
 ## Template Format
 
 The script requires data in a specific format:
