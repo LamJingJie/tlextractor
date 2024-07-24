@@ -1,15 +1,18 @@
 from colorama import Fore
-from playwright.sync_api import sync_playwright, Page, BrowserContext, Browser
+from playwright.sync_api import sync_playwright, Page, BrowserContext
 import json
-import requests
 import threading
 import sys
 import time
 from PIL import Image
 import io
+from concurrent.futures import ThreadPoolExecutor
 import base64
 import os
-import shutil
+import requests
+from multiprocessing import Lock, Pool, Manager, cpu_count
+import queue
+from yarl import URL
 
 # Data Structure Example:
 # {
@@ -32,11 +35,11 @@ import shutil
 
 # TASKS:
 # Use Threading first when initializing pages
-# afterwards, use multi-processing for each of the images in their respective pages (ensure each image has unique name)
+# afterwards, use async and multi-processing for each of the images in their respective pages (ensure each image has unique name)
 
 #Video
 '''
-https://github.com/LamJingJie/tlextractor/assets/58838335/8ea12541-120f-4b0e-8577-770f6d90232a
+https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa
 '''
 
 # -----------------Functions-----------------#
@@ -44,9 +47,29 @@ https://github.com/LamJingJie/tlextractor/assets/58838335/8ea12541-120f-4b0e-857
 all_page_data = []
 data_lock = threading.Lock()
 console_lock = threading.Lock()
+exception_queue_threads = queue.Queue()
+
+# Track all the images that have been processed to prevent duplicates, use manager to share across processes
+# because processes do not share memory space
+images_obj_tracker = None 
+image_lock = None
+pool = None # multi-processing pool
+
 
 # Process pages chosen by the user
 def process_pages(url, targets, context: BrowserContext):
+    global pool, all_page_data, images_obj_tracker, image_lock
+
+    stop_loading = threading.Event()
+    setup_thread = threading.Thread(target=setting_up_screen, args=(stop_loading,))
+    setup_thread.start()  # Start the loading screen
+
+    # Initializing the multi-processing pool
+    manager = Manager()
+    pool = Pool(processes=20) # <-- Change depending on ur system*
+    images_obj_tracker = manager.dict()
+    image_lock = manager.Lock()
+
     prj_title = ''
     pages_threads = []
 
@@ -70,35 +93,43 @@ def process_pages(url, targets, context: BrowserContext):
     else:
         delete_files(folder_name)
     
+    stop_loading.set()
+    setup_thread.join()
  
     # Loop through each frame and extract the data
     # Get the thread ready and after all has been initialized, start executing the threads. Order determined by OS
-    rows = 0
-    print("Extracting data from the following pages:")
+    print("\n\nExtracting data from the following pages:")
+    rows = 4
     for frame in targets:
-        rows+=1
-        individual_page_thread = threading.Thread(target=run_individual_page, args=(rows + 2, url, frame, folder_name, prj_title))
+        individual_page_thread = threading.Thread(target=run_individual_page, args=(rows, url, frame, folder_name, prj_title))
         individual_page_thread.start()
         pages_threads.append(individual_page_thread)
-        
+        rows+=1
+
 
     # Wait for all threads to finish
     for thread in pages_threads:
         thread.join()
-    
+
+   
     # Move to right below the threads
-    move_cursor(len(targets) + 5, 1)
+    move_cursor(rows + 2, 1)
+
     
     website_data = {
         "project title": prj_title,
         "data": all_page_data
     }
 
+    sys.stdout.write("\rImage currently being processed, dont exit! This may take a while...")
+
     return website_data, prj_title, folder_name
 
 
 # Utilize threading to extract data from each page
 def run_individual_page(row, url, frame, folder_name, prj_title):
+    global all_page_data, data_lock
+
     stop_loading_success = threading.Event()
     stop_loading_failure = threading.Event()
     loading_thread = threading.Thread(target=loading_screen, args=(row, frame, stop_loading_success, stop_loading_failure))
@@ -114,7 +145,8 @@ def run_individual_page(row, url, frame, folder_name, prj_title):
         # This is added to ensure that the loading screen stops and the thread is joined before the program exits
         stop_loading_failure.set()
         loading_thread.join()
-        raise Exception("Error 00:", str(e))
+        exception_queue_threads.put(f"{frame}--> {e}")
+    
 
     stop_loading_success.set()  # Stop the loading screen
     # Wait for the loading screen to finish before going to the next frame/page
@@ -322,69 +354,71 @@ def get_student_data_method2(shapes, frame_id, assets, folder_name, date, prj_ti
 
     return list(student_names)
 
-    
+
+# Resize img and save it in seperate folder
+def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_title, chosen_frame, img_tracker_dict, img_lock):
+
+    Image.MAX_IMAGE_PIXELS = None
+    # Check if the image is a base64 image rather than a url
+    if (img_url.startswith('data:image') and img_url.find('base64,')):
+        base64_index = img_url.find('base64,') + len('base64,')
+        # Decode everything after the base64, to get the image data
+        img_data = base64.b64decode(img_url[base64_index:])
+    else:
+        response = requests.get(img_url)
+        if response.status_code == 200:
+            img_data = response.content
+        else:
+            raise Exception("Error 04: Image not found. Exiting program.")
+
+    # Write bytes into memory temporarily and use it to open the img
+    img = Image.open(io.BytesIO(img_data))
+
+    # Resize the image if it exceeds the max resolution on either x or y axis
+    try:
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+
+        max_reso_x_y = 4096
+
+        if img.width > max_reso_x_y:
+            new_width = max_reso_x_y
+            img = img.resize((new_width, img.height),
+                             Image.Resampling.LANCZOS)  # Smooth the img
+
+        if img.height > max_reso_x_y:
+            new_height = max_reso_x_y
+            img = img.resize((img.width, new_height),
+                             Image.Resampling.LANCZOS)  # Smooth the img
+
+        # Save Image with incremental unique id, prevent overwriting
+        img_name = prj_title + "___" + chosen_frame + "___" + date + \
+            "___" + student_name + "___"
+
+        with img_lock:
+            img_tracker_dict[img_name] = img_tracker_dict.get(img_name, 0) + 1
+
+        img_name += str(img_tracker_dict[img_name]) + '.png'
+        save_path = os.path.join(folder_name, img_name)
+        img.save(save_path, format='PNG')
+
+    except Exception as e:
+        raise Exception("Error 04:", str(e))
+
 
 
 # Get the student image and save it in a seperate folder
 def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title, chosen_frame):
-
-    # Resize img and save it in seperate folder
-    def img_resize_and_save(img_url):
-        Image.MAX_IMAGE_PIXELS = None
-
-        # Check if the image is a base64 image rather than a url
-        if(img_url.startswith('data:image') and img_url.find('base64,')):
-            base64_index = img_url.find('base64,') + len('base64,')
-            # Decode everything after the base64, to get the image data
-            image_data = base64.b64decode(img_url[base64_index:])
-            img = Image.open(io.BytesIO(image_data))
-        else:
-            response = requests.get(img_url)
-            if response.status_code == 200:
-                img = Image.open(io.BytesIO(response.content))
-            else:
-                raise Exception("Error 04: Image not found. Exiting program.")
-
-        # Resize the image if it exceeds the max resolution on either x or y axis
-        try:
-            if img.mode != 'RGBA':
-                img = img.convert('RGBA')
-
-            max_reso_x_y = 4096
-
-            if img.width > max_reso_x_y:
-                new_width = max_reso_x_y
-                img = img.resize((new_width, img.height),
-                               Image.Resampling.LANCZOS)  # Smooth the img
-
-            if img.height > max_reso_x_y:
-                new_height = max_reso_x_y
-                img = img.resize((img.width, new_height),
-                                 Image.Resampling.LANCZOS)  # Smooth the img
-
-            # Save Image with incremental unique id, prevent overwriting
-            uniqueid = 1
-            img_name = ""
-            #process_id = current_process().pid
-            while img_name == "" or os.path.exists(save_path):
-                img_name = prj_title + "___" + chosen_frame + "___" + date + \
-                        "___" + student_name + "___" + str(uniqueid) + ".png"
-                save_path = os.path.join(folder_name, img_name)
-                uniqueid += 1
-
-            img.save(save_path, format='PNG') #Err here
-
-        except Exception as e:
-            raise Exception("Error 04:", str(e))
-
-
+    global pool
     for asset in assets:
-        # Get the student image
+        # Get the student image in the assets array
         if asset_id == asset['id']:
-            img = asset['props']['src']           
-            img_resize_and_save(img)
+            img = asset['props']['src']
 
-
+            # Run image resizing in multi-processing by submitting tasks inside hehe
+            pool.apply_async(img_resize_save, args=(img, folder_name, student_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock))
+            break
+            
 
 
 def get_all_pages(url, page: Page):
@@ -411,7 +445,15 @@ def clear_screen():
     sys.stdout.flush()
 
 
+def setting_up_screen(stop_loading):
+    while not stop_loading.is_set():
+        sys.stdout.write("\rSetting up the system...")
+    sys.stdout.write("\rSystem setup complete.")
+
+
 def loading_screen(row, curr_frame, stop_loading_success, stop_loading_failure):
+    global console_lock
+
     line_length = 10
     position = 0
 
@@ -434,9 +476,9 @@ def loading_screen(row, curr_frame, stop_loading_success, stop_loading_failure):
         # Move the cursor to the same row and override the loading screen with final msg
         move_cursor(row, 1)
         if(stop_loading_failure.is_set()):
-            sys.stdout.write(Fore.LIGHTRED_EX + "\r" + curr_frame + " failed. Exiting program." + Fore.RESET)
+            sys.stdout.write("\r\033[K" + Fore.LIGHTRED_EX + "\r" + curr_frame + " failed. Exiting program." + Fore.RESET)
         else:
-            sys.stdout.write(Fore.LIGHTGREEN_EX + "\r" + curr_frame + " extracted successfully." + Fore.RESET)
+            sys.stdout.write("\r\033[K" + Fore.LIGHTGREEN_EX + "\r" + curr_frame + " extracted successfully." + Fore.RESET)
 
 
 
@@ -464,6 +506,7 @@ def save_data(data, prj_title):
 
 # -----------------Main Program-----------------#
 def main(targets):
+    global pool
     # Where all the magic happens
     with sync_playwright() as p:
         prj_title = ''
@@ -479,16 +522,32 @@ def main(targets):
             page = context.new_page()
             targets = get_all_pages(url, page)
             page.close()
+
+        complete_data, prj_title, folder_name = process_pages(url, targets, context)
+
         try:
-            complete_data, prj_title, folder_name = process_pages(url, targets, context)
             save_data(complete_data, prj_title)
         except Exception as e:
             print("\n" + Fore.LIGHTYELLOW_EX + str(e) + Fore.RESET + "\n")
+            context.close()
+            browser.close()
+            pool.close()
+            pool.join()
             exit()
     
         context.close()
         browser.close()
-        print(Fore.LIGHTGREEN_EX + f"Data successfully extracted and saved at '{prj_title}.json' and '{folder_name}' folder" + Fore.RESET)
+
+        # Close the pool of multi-processors
+        pool.close()
+        pool.join()
+
+        if not exception_queue_threads.empty():
+            while not exception_queue_threads.empty():
+                e = exception_queue_threads.get()
+                sys.stdout.write("\r\033[K" + Fore.LIGHTYELLOW_EX + f"\r{e}\n" + Fore.RESET)
+        else:
+            sys.stdout.write("\r\033[K" + Fore.LIGHTGREEN_EX + f"\rData successfully extracted and saved at '{prj_title}.json' and '{folder_name}' folder" + Fore.RESET)
 
 
 

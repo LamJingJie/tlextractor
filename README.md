@@ -2,10 +2,16 @@
 
 TLExtractor is a Python script designed to extract specific data from tldraw pages. It utilizes a template to ensure data accuracy. Extracted data is saved as JSON, while images are stored in a folder named after the project title. This script accommodates two scenarios: the **standard tldraw** and **tldraw with a custom submission template**, each with unique but similar designs.
 
+## Custom Submission Template
+
 For more information on the **custom submission template**, visit:
 [Custom Submission Template](https://github.com/LamJingJie/tldraw/tree/dynamic_submission_template/templates/vite)
 
-TLExtractor leverages Depth-first search for data searching and saving. It employs Multi-Threading to open multiple threads of pages and utilizes Playwright to then extract data respectively. Multi-Processing is used for multiple images processing, especially when there are a lot of images that need processing. Multi-Processing is nested inside Multi-Threading as the start is more I/O intensive and the end is more CPU intensive.
+## Features
+
+- **Depth-first Search**: Utilized for data searching and saving.
+- **Multi-Threading**: Opens multiple threads of pages and uses Playwright to extract data respectively.
+- **Multi-Processing**: Processes multiple images, especially useful when there are a lot of images that need processing. Multi-Processing (20) is nested inside Multi-Threading as the start is more I/O intensive and the end is more CPU intensive.
 
 ## Template Format
 
@@ -48,7 +54,7 @@ To install TLExtractor:
 
 1. Clone the repository or download the source code.
 2. Navigate to the project directory.
-3. Install the virtual environment:
+3. Install the virtual environment (for ease of dependencies installation):
 
    ```bash
    pip install pipenv
@@ -76,5 +82,5 @@ python tlextractor.py
 
 ## Demo Video
 
-<a href="https://github.com/LamJingJie/tlextractor/assets/58838335/8ea12541-120f-4b0e-8577-770f6d90232a" target="_blank"><img src="https://github.com/LamJingJie/tlextractor/assets/58838335/8ea12541-120f-4b0e-8577-770f6d90232a"
+<a href="https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa" target="_blank"><img src="https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa"
 alt="IMAGE ALT TEXT HERE" width="240" height="180" border="10" /></a>

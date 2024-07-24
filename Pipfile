@@ -8,6 +8,8 @@ lxml-html-clean = "*"
 pytest-playwright = "*"
 playwright = "*"
 pillow = "*"
+aiohttp = "*"
+aiofiles = "*"
 
 [dev-packages]
 
