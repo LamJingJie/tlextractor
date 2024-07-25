@@ -43,6 +43,7 @@ https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa
 '''
 
 # -----------------Functions-----------------#
+
 # Global Variable
 all_page_data = []
 data_lock = threading.Lock()
@@ -55,7 +56,7 @@ images_obj_tracker = None
 image_lock = None
 pool = None # multi-processing pool
 
-
+# -----------------Main Functions-----------------#
 # Process pages chosen by the user
 def process_pages(url, targets, context: BrowserContext):
     global pool, all_page_data, images_obj_tracker, image_lock
@@ -200,17 +201,6 @@ def ActivateBot(url, chosen_frame, folder_name, prj_title):
     page_data = ExtractData(chosen_frame, json_content, folder_name, prj_title)
 
     return page_data
-
-
-
-# Loop through the dropdown menu and click the target page
-def Dropdown_Checker(chosen_frame, menu):
-    for option in menu:
-        value = option.inner_text().lower().strip()
-        if chosen_frame == value:
-            option.click()
-            return True
-    return False
 
 
 
@@ -361,6 +351,19 @@ def get_student_data_method2(shapes, frame_id, assets, folder_name, date, prj_ti
     return list(student_names)
 
 
+# Get the student image and save it in a seperate folder
+def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title, chosen_frame):
+    global pool
+    for asset in assets:
+        # Get the student image in the assets array
+        if asset_id == asset['id']:
+            img = asset['props']['src']
+
+            # Run image resizing in multi-processing by submitting tasks inside hehe
+            pool.apply_async(img_resize_save, args=(img, folder_name, student_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock))
+            break
+            
+
 # Resize img and save it in seperate folder
 def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_title, chosen_frame, img_tracker_dict, img_lock):
 
@@ -411,20 +414,19 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
     except Exception as e:
         raise Exception("Error 04:", str(e))
 
+# ------------End Of Main Functions----------------- #
 
+# ------------Side Functions----------------- #
 
-# Get the student image and save it in a seperate folder
-def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title, chosen_frame):
-    global pool
-    for asset in assets:
-        # Get the student image in the assets array
-        if asset_id == asset['id']:
-            img = asset['props']['src']
+# Loop through the dropdown menu and click the target page
+def Dropdown_Checker(chosen_frame, menu):
+    for option in menu:
+        value = option.inner_text().lower().strip()
+        if chosen_frame == value:
+            option.click()
+            return True
+    return False
 
-            # Run image resizing in multi-processing by submitting tasks inside hehe
-            pool.apply_async(img_resize_save, args=(img, folder_name, student_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock))
-            break
-            
 
 
 def get_all_pages(url, page: Page):
@@ -442,6 +444,7 @@ def get_all_pages(url, page: Page):
         exit()
 
 
+
 # Move the cursor to the specified row and column in the terminal
 def move_cursor(row, col):
     sys.stdout.write(f"\033[{row};{col}H")
@@ -454,10 +457,12 @@ def clear_screen():
     sys.stdout.flush()
 
 
+
 def setting_up_screen(stop_loading):
     while not stop_loading.is_set():
         sys.stdout.write("\rSetting up the system...")
     sys.stdout.write("\rSystem setup complete.")
+
 
 
 def loading_screen(row, curr_frame, stop_loading_success, stop_loading_failure):
@@ -509,6 +514,7 @@ def save_data(data, prj_title):
     except Exception as e:
         raise Exception("Error 05:", str(e))
 
+# ------------End Of Side Functions----------------- #
 
 # -----------------End of Functions-----------------#
 
