@@ -73,9 +73,15 @@ def process_pages(url, targets, context: BrowserContext):
     prj_title = ''
     pages_threads = []
 
-    # Get project title
-    page = context.new_page() 
-    page.goto(url)
+    # Get project titles
+    page = context.new_page()
+    try:
+        page.goto(url)
+    except Exception as e:
+        stop_loading.set()
+        setup_thread.join()
+        raise Exception(Fore.LIGHTYELLOW_EX + "Program Start: " + str(e) + Fore.RESET)
+    
     page.wait_for_selector(".tlui-popover", state='visible')
 
     # Try to get the project title, if not found, set it to "Untitled Project"
@@ -101,7 +107,7 @@ def process_pages(url, targets, context: BrowserContext):
     print("\n\nExtracting data from the following pages:")
     rows = 4
     for frame in targets:
-        individual_page_thread = threading.Thread(target=run_individual_page, args=(rows, url, frame, folder_name, prj_title))
+        individual_page_thread = threading.Thread(target=run_individual_page, args=(rows, url, frame, folder_name, prj_title)) 
         individual_page_thread.start()
         pages_threads.append(individual_page_thread)
         rows+=1
@@ -424,13 +430,16 @@ def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title
 def get_all_pages(url, page: Page):
     # Take from menu dropdown list
     page_list = []
-    page.goto(url)
-    page.wait_for_selector(".tlui-popover")
-    page.click(".tlui-button__menu")
-    dropdown_menu = page.query_selector('.tlui-page-menu__list')
-    page_list = dropdown_menu.inner_text().lower().split("\n")
-    return page_list
-
+    try:
+        page.goto(url)
+        page.wait_for_selector(".tlui-popover")
+        page.click(".tlui-button__menu")
+        dropdown_menu = page.query_selector('.tlui-page-menu__list')
+        page_list = dropdown_menu.inner_text().lower().split("\n")
+        return page_list
+    except Exception as e:
+        print(Fore.LIGHTYELLOW_EX + "Program Start: " + str(e) + Fore.RESET)
+        exit()
 
 
 # Move the cursor to the specified row and column in the terminal
@@ -523,9 +532,8 @@ def main(targets):
             targets = get_all_pages(url, page)
             page.close()
 
-        complete_data, prj_title, folder_name = process_pages(url, targets, context)
-
         try:
+            complete_data, prj_title, folder_name = process_pages(url, targets, context)
             save_data(complete_data, prj_title)
         except Exception as e:
             print("\n" + Fore.LIGHTYELLOW_EX + str(e) + Fore.RESET + "\n")
