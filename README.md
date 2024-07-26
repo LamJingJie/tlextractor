@@ -1,6 +1,6 @@
 # TLExtractor
 
-TLExtractor is a Python script designed to extract specific data from tldraw pages. It utilizes a template to ensure data accuracy. Extracted data is saved as JSON, while images are stored in a folder named after the project title. This script accommodates two scenarios: the **standard tldraw** and **tldraw with a custom submission template**, each with unique but similar designs.
+TLExtractor is a Python script designed to extract specific data from tldraw pages. It utilizes a template to ensure data accuracy. Extracted data is saved as JSON, while processed images (resizing) are stored in a folder named after the project title. This script accommodates two scenarios: the **standard tldraw** and **tldraw with a custom submission template**, each with unique but similar designs.
 
 ## 📄 Custom Submission Template
 
