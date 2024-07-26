@@ -9,9 +9,9 @@ For more information on the **custom submission template**, visit:
 
 ## ✨ Features
 
-- **Depth-first Search**: Utilized for data searching and saving.
-- **Multi-Threading**: Opens multiple threads of pages and uses Playwright to extract data respectively.
-- **Multi-Processing**: Processes multiple images, especially useful when there are a lot of images that need processing. Multi-Processing (20) is nested inside Multi-Threading as the start is more I/O intensive and the end is more CPU intensive.
+- **🔍 Depth-first Search**: Utilized for data searching and saving.
+- **🧵 Multi-Threading**: Opens multiple threads of pages and uses Playwright to extract data respectively.
+- **⚙️ Multi-Processing**: Processes multiple images, especially useful when there are a lot of images that need processing. Multi-Processing (20) is nested inside Multi-Threading as the start is more I/O intensive and the end is more CPU intensive.
 
 ## 📋 Template Format
 
@@ -75,7 +75,6 @@ To use TLExtractor, follow these steps:
 python tlextractor.py
 ```
 
-## Demo Video
+## 🎥 Demo Video
 
-<a href="https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa" target="_blank"><img src="https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa"
-alt="IMAGE ALT TEXT HERE" width="240" height="180" border="10" /></a>
+![Demo Vid](https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa")
