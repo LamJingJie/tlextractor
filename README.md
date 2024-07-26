@@ -22,6 +22,7 @@ The script requires data in a specific format:
 - The main/outermost frame name must match the page name exactly.
 - For **standard tldraw**, frame each person's submissions together, including their names in the frame.
 - Avoid special characters.
+- Do not further 'frame' the submissions that are already inside the student frame.
 
 ### 🖼️ Template Examples
 
