@@ -77,4 +77,4 @@ python tlextractor.py
 
 ## 🎥 Demo Video
 
-[![Demo Vid](https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa)]
+[![Demo Vid](https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa)](https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa)
