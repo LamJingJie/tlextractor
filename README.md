@@ -5,7 +5,7 @@ TLExtractor is a Python script designed to extract specific data from tldraw pag
 ## 📄 Custom Submission Template
 
 For more information on the **custom submission template**, visit:
-[Custom Submission Template](https://github.com/LamJingJie/tldraw/tree/dynamic_submission_template/templates/vite)
+[Custom Submission Template](https://github.com/LamJingJie/tldraw/tree/dynamic_submission_template)
 
 ## ✨ Features
 
