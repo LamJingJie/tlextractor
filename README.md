@@ -24,8 +24,9 @@ For more information on the **custom submission template**, visit:
   - Uses Async Playwright to extract data.
 
 - **⚙️ Multi-Processing**:
+  - Process multiple recursion functions. Retrieve student names that submitted their project.
   - Processes multiple images, especially useful when there are many images to process.
-  - Multi-Processing (15) is nested inside Async as the start is more I/O intensive and the end is more CPU intensive.
+  - Multi-Processing (17) is nested inside Async as the start is more I/O intensive and the end is more CPU intensive.
 
 - **🧵 Multi-Threading**:
   - Creates as many loading threads as there are coroutine objects.

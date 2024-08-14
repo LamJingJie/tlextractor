@@ -8,7 +8,7 @@ import sys
 import time
 from PIL import Image
 import io
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 import base64
 import os
 import requests
@@ -60,18 +60,18 @@ exception_queue_threads = queue.Queue()
 # With img_lock to prevent race conditions and data corruption when updating the tracker
 images_obj_tracker = None 
 image_lock = None
-pool = None # multi-processing pool
+processors = None # multi-processing executor
 
 # -----------------Main Functions-----------------#
 # Process pages chosen by the user
 async def process_pages(url, targets, context: BrowserContext, stop_loading, setup_thread):
-    global pool, all_page_data, images_obj_tracker, image_lock
+    global all_page_data, images_obj_tracker, image_lock, processors
 
     # Initializing the multi-processing pool
     manager = Manager()
-    pool = Pool(processes=15) # <-- Change depending on ur system*
     images_obj_tracker = manager.dict()
     image_lock = manager.Lock()
+    processors = ProcessPoolExecutor(max_workers=16) # <-- Change depending on ur system*
 
     prj_title = ''
     pages_threads = []
@@ -115,7 +115,10 @@ async def process_pages(url, targets, context: BrowserContext, stop_loading, set
     
     # Starts executing the async functions
     # Wait for all async functions to finish
-    await asyncio.gather(*pages_threads)
+    try:
+        await asyncio.gather(*pages_threads)
+    except Exception as e:
+        raise Exception(Fore.LIGHTYELLOW_EX + "Exec individual page: " + str(e) + Fore.RESET)
 
     # Move to right below the threads
     move_cursor(rows + 2, 1)
@@ -150,7 +153,8 @@ async def run_individual_page(row, url, frame, folder_name, prj_title):
         # This is added to ensure that the loading screen stops and the thread is joined before the program exits
         stop_loading_failure.set()
         loading_thread.join()
-        await exception_queue_threads.put(f"{frame}--> {e}")
+        raise Exception(f"{e}")
+
     
 
     stop_loading_success.set()  # Stop the loading screen
@@ -204,6 +208,7 @@ async def ActivateBot(url, chosen_frame, folder_name, prj_title):
 
 # Extract the necessary data from the JSON
 async def ExtractData(chosen_frame: str, content: json, folder_name, prj_title):
+    global processors, images_obj_tracker, image_lock
     frame_id = ''
     desc = ''
     date = ''
@@ -259,12 +264,33 @@ async def ExtractData(chosen_frame: str, content: json, folder_name, prj_title):
 
     # Use different methods depending on the custom template presence
     # Only students that have submitted will be included
+    # Combine concurrency and parallism to speed up the process 
     if(isCustomTemplatePresent):
-        students = await get_student_data_method2(content['shapes'], frame_id, content['assets'], folder_name, date, prj_title, chosen_frame)
+        future_obj = processors.submit(get_student_data_method2, content['shapes'], frame_id, 
+                                          content['assets'], folder_name, date, prj_title, chosen_frame,
+                                          images_obj_tracker, image_lock)
     else:
-        students = await get_student_data_method1(content['shapes'], frame_id, content['assets'], folder_name, date, prj_title, chosen_frame)
+        #students = await loop.run_in_executor(processors, get_student_data_method1, content['shapes'], frame_id, content['assets'], folder_name, date, prj_title, chosen_frame)
+        future_obj = processors.submit(get_student_data_method1, content['shapes'], frame_id, 
+                                           content['assets'], folder_name, date, prj_title, chosen_frame,
+                                           images_obj_tracker, image_lock)
 
+    # Convert future obj to coroutine obj -> Combining async and multi-processing
+    students, img_tasks = await asyncio.wrap_future(future_obj)
+
+
+    # Did this outside the get_student_data_method1/2 to prevent the program from crashing
+    # Reason is that creating sub-tasks within a task one by one may cause issues (Resource Exhaustion - too many tasks)
+    #   -> If creating tasks, you can create them one by one
+    #   -> If creating sub-tasks, you should either create them all at once (for btr predictability) or in batches or use a diff pool to avoid overwhelming the executor
+
+    # --May need to implement batch processing to avoid overwhelming the executor (for big scale projects). But we will come to that when that happens :>--
     
+    # Submit all image saving tasks at once to the multi-processing pool
+    for task in img_tasks:
+        # task[0] is function, task[1:] is other parameters
+        processors.submit(task[0], *task[1:], content['assets'])
+
     page_data = {
         'page': chosen_frame,
         'date': date,
@@ -291,72 +317,96 @@ def get_Frame_Desc(shapes, frame_id):
 # Get student data recursively by assuming that the student's image is always in the frame and that frame has the student name
 # Utilizing DFS algorithm
 # Method 1: No custom template
-async def get_student_data_method1(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, name=None):
-    global pool, images_obj_tracker, image_lock
+def get_student_data_method1(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock, name=None, tasks=None):
+    if tasks is None:
+        tasks = set()
     student_names = set() # Only keep unique names
     has_student_imgs = False
+   
     for shape in shapes:
 
         # Stops here when an image is found and returns the student data
         if shape['parentId'] == frame_id and shape['type'] == 'image' and name is not None:
-
             # use multi-processing to get images, resize and save them in parallel. Submit tasks to the pool
-            pool.apply_async(get_student_img, args=(shape['props']['assetId'], assets, folder_name, name, date, prj_title, 
-                                                    chosen_frame, images_obj_tracker, image_lock))
+            # processors.submit(get_student_img, shape['props']['assetId'], assets, folder_name, name, date, prj_title, 
+            #                                         chosen_frame, images_obj_tracker, image_lock)
+            tasks.add((get_student_img, shape['props']['assetId'], folder_name, name, date, prj_title, chosen_frame, images_obj_tracker, image_lock))
+            
             has_student_imgs = True
             
         # Perform a recursive call if its a frame 
         if shape['parentId'] == frame_id and shape['type'] == 'frame':
             name = shape['props']['name'].strip().replace('<', '').replace('>', '')
-            student_names.update(await get_student_data_method1(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
+            sub_student_names, sub_tasks = get_student_data_method1(shapes, shape['id'],assets, folder_name, date, prj_title, 
+                                                                chosen_frame, images_obj_tracker, image_lock, name, tasks)
+            student_names.update(sub_student_names)
+            tasks.update(sub_tasks)
 
             name = None # Reset the name to None after the recursive call
 
         # Check if the student is in a group if so, get the grp id and perform a recursive call
         if shape['parentId'] == frame_id and shape['type'] == 'group':
-            student_names.update(await get_student_data_method1(shapes, shape['id'],assets, folder_name, date, prj_title, chosen_frame, name))
+            # student_names.update(get_student_data_method1(shapes, shape['id'],assets, folder_name, date, prj_title, 
+            #                                                     chosen_frame, images_obj_tracker, image_lock, image_tasks, name))
+            sub_student_names, sub_tasks = get_student_data_method1(shapes, shape['id'],assets, folder_name, date, prj_title, 
+                                                                chosen_frame, images_obj_tracker, image_lock, name, tasks)
+            student_names.update(sub_student_names)
+            tasks.update(sub_tasks)
 
 
     if name is not None and has_student_imgs:
         student_names.add(name)
 
-    return list(student_names)
+    return list(student_names), tasks
 
 
 # Get student data, if any frame or group perform recursion until it reaches the custom template type
 # Utilizing DFS algorithm
 # Method 2: Custom template
-async def get_student_data_method2(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, name = None):
+def get_student_data_method2(shapes, frame_id, assets, folder_name, date, prj_title, chosen_frame, processors :ProcessPoolExecutor, images_obj_tracker, image_lock, name = None, tasks = None):
+    if tasks is None:
+        tasks = set()
+
     student_names = set() # Only keep unique names
     has_student_imgs = False
+
     for shape in shapes:
         # Stops here when an image is found and its inside the submission_frame
         if shape['parentId'] == frame_id and shape['type'] == 'image' and name is not None:
 
-             # use multi-processing to get images, resize and save them in parallel. Submit tasks to the pool
-            pool.apply_async(get_student_img, args=(shape['props']['assetId'], assets, folder_name, name, date, prj_title, 
-                                                    chosen_frame, images_obj_tracker, image_lock))
+            # # use multi-processing to get images, resize and save them in parallel. Submit tasks to the pool
+            # processors.submit(get_student_img, shape['props']['assetId'], assets, folder_name, name, date, prj_title, 
+            #                                         chosen_frame, images_obj_tracker, image_lock)
+            tasks.add((get_student_img, shape['props']['assetId'], folder_name, name, date, prj_title, chosen_frame, images_obj_tracker, image_lock))
+            
             has_student_imgs = True
 
         # Perform a recursive call and send over the student name
         if shape['type'] == 'submission_frame' and shape['parentId'] == frame_id:
             name = shape['props']['name'].strip().replace('<', '').replace('>', '')
-            student_names.update(await get_student_data_method2(shapes, shape['id'], assets, folder_name, date, prj_title, chosen_frame, name))
+            sub_student_names, sub_tasks = get_student_data_method2(shapes, shape['id'], assets, folder_name, date, prj_title,
+                                                                    chosen_frame, processors, images_obj_tracker, image_lock, name, tasks)
+            student_names.update(sub_student_names)
+            tasks.update(sub_tasks)
 
             name = None
         
         if (shape['type'] == 'group' or shape['type'] == 'frame') and shape['parentId'] == frame_id:
             # Perform a recursive call if its a group or frame, each time going deeper
-            student_names.update(await get_student_data_method2(shapes, shape['id'], assets, folder_name, date, prj_title, chosen_frame, name))
+            sub_student_names, sub_tasks = get_student_data_method2(shapes, shape['id'], assets, folder_name, date, prj_title,
+                                                                    chosen_frame, processors, images_obj_tracker, image_lock, name, tasks)
+            student_names.update(sub_student_names)
+            tasks.update(sub_tasks)
     
     if name is not None and has_student_imgs:
         student_names.add(name)
 
-    return list(student_names)
+    return list(student_names), tasks
 
 
 # Get the student image and save it in a seperate folder
-def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock):
+def get_student_img(asset_id, folder_name, student_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock, assets):
+
     for asset in assets:
         # Get the student image in the assets array
         if asset_id == asset['id']:
@@ -367,7 +417,6 @@ def get_student_img(asset_id, assets, folder_name, student_name, date, prj_title
 
 # Resize img and save it in seperate folder
 def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_title, chosen_frame, img_tracker_dict, img_lock):
-
     Image.MAX_IMAGE_PIXELS = None
     # Check if the image is a base64 image rather than a url
     if (img_url.startswith('data:image') and img_url.find('base64,')):
@@ -379,7 +428,7 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
         if response.status_code == 200:
             img_data = response.content
         else:
-            raise Exception("Error 04: Image not found. Exiting program.")
+            exception_queue_threads.put(f"Error 04: Image not found for {student_name} at {chosen_frame} from {prj_title}.")
 
     # Write bytes into memory temporarily and use it to open the img
     img = Image.open(io.BytesIO(img_data))
@@ -390,15 +439,19 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
             img = img.convert('RGBA')
 
         max_reso_x_y = 4096
+        aspect_ratio = img.width / img.height
 
         if img.width > max_reso_x_y:
             new_width = max_reso_x_y
-            img = img.resize((new_width, img.height),
+            new_height = new_width / aspect_ratio
+
+            img = img.resize((new_width, new_height),
                              Image.Resampling.LANCZOS)  # Smooth the img
 
         if img.height > max_reso_x_y:
             new_height = max_reso_x_y
-            img = img.resize((img.width, new_height),
+            new_width = aspect_ratio * new_height
+            img = img.resize((new_width, new_height),
                              Image.Resampling.LANCZOS)  # Smooth the img
 
         # Save Image with incremental unique id, prevent overwriting
@@ -413,7 +466,7 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
         img.save(save_path, format='PNG')
 
     except Exception as e:
-        raise Exception("Error 04:", str(e))
+        exception_queue_threads.put(f"Error 04: {e}")
 
 # ------------End Of Main Functions----------------- #
 
@@ -524,7 +577,7 @@ def save_data(data, prj_title):
 
 # -----------------Main Program-----------------#
 async def main(targets):
-    global pool
+    global processors
 
     stop_loading = threading.Event()
     setup_thread = threading.Thread(target=setting_up_screen, args=(stop_loading,))
@@ -564,8 +617,7 @@ async def main(targets):
             setup_thread.join()
             await context.close()
             await browser.close()
-            pool.close()
-            pool.join()
+            processors.shutdown()
             print("\n" + Fore.LIGHTYELLOW_EX + str(e) + Fore.RESET + "\n")
             exit()
     
@@ -573,8 +625,7 @@ async def main(targets):
         await browser.close()
 
         # Close the pool of multi-processors and wait for all of them to finish all tasks before exiting
-        pool.close()
-        pool.join()
+        processors.shutdown()
 
         if not exception_queue_threads.empty():
             while not exception_queue_threads.empty():
@@ -616,6 +667,8 @@ if __name__ == "__main__":
         exit()
     clear_screen()
     move_cursor(1, 1)
+
+    # Allow the execution of the async main program in an sync environment
     asyncio.run(main(targets))
     
         
