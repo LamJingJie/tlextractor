@@ -423,7 +423,7 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
     # Write bytes into memory temporarily and use it to open the img
     img = Image.open(io.BytesIO(img_data))
 
-    # Resize the image if it exceeds the max resolution on either x or y axis
+
     try:
         if img.mode != 'RGBA':
             img = img.convert('RGBA')
@@ -431,18 +431,20 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
         max_reso_x_y = 4096
         aspect_ratio = img.width / img.height
 
-        if img.width > max_reso_x_y:
-            new_width = max_reso_x_y
-            new_height = new_width / aspect_ratio
-
+        # Resize the image if it exceeds the max resolution on either x or y axis 
+        if img.width > max_reso_x_y or img.height > max_reso_x_y:
+            if aspect_ratio <= 1:
+                # Image is vertically long or square
+                new_height = max_reso_x_y
+                new_width = aspect_ratio * new_height
+            else:
+                # Image is horizontally long
+                new_width = max_reso_x_y
+                new_height = new_width / aspect_ratio
+            
             img = img.resize((int(new_width), int(new_height)),
                              Image.Resampling.LANCZOS)  # Smooth the img
 
-        if img.height > max_reso_x_y:
-            new_height = max_reso_x_y
-            new_width = aspect_ratio * new_height
-            img = img.resize((int(new_width), int(new_height)),
-                             Image.Resampling.LANCZOS)  # Smooth the img
 
         # Save Image with incremental unique id, prevent overwriting
         img_name = prj_title + "___" + chosen_frame + "___" + date + \
