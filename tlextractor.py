@@ -452,8 +452,8 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
 
         with img_lock:
             img_tracker_dict[img_name] = img_tracker_dict.get(img_name, 0) + 1
+            img_name += str(img_tracker_dict[img_name]) + '.png'
             
-        img_name += str(img_tracker_dict[img_name]) + '.png'
         save_path = os.path.join(folder_name, img_name)
         img.save(save_path, format='PNG')
 
