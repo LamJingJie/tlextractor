@@ -36,10 +36,6 @@ import asyncio
 
 # Example: https://www.tldraw.com/r/fOZmgi9MQzQc-rrXnpAz6?v=-167,-196,5343,2630&p=HGtpLC0ipiTvgK6awql7m
 
-# TASKS:
-# Use Threading first when initializing pages
-# afterwards, use async and multi-processing for each of the images in their respective pages (ensure each image has unique name)
-
 #Video
 '''
 https://github.com/user-attachments/assets/dc9f5a26-42ee-4a25-8939-9bdc7ec75dfa
@@ -122,6 +118,7 @@ async def process_pages(url, targets, context: BrowserContext, stop_loading, set
     
     # Starts executing the async functions
     # Wait for all async functions to finish
+    # But doesn't wait for the image to finish saving before continuing
     await asyncio.gather(*pages_async)
 
 
@@ -158,7 +155,8 @@ async def run_individual_page(row, url, frame, folder_name, prj_title, async_exc
         # This is added to ensure that the loading screen stops and the thread is joined before the program exits
         stop_loading_failure.set()
         loading_thread.join()
-        async_exception_error_queue.put(f"{frame}--> {e}")
+        async with data_lock:
+            async_exception_error_queue.put(f"{frame}--> {e}")
 
     stop_loading_success.set()  # Stop the loading screen
     # Wait for the loading screen to finish before going to the next frame/page
@@ -458,7 +456,8 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
         img.save(save_path, format='PNG')
 
     except Exception as e:
-        mp_exception_error_queue.put(f"Error 04: {e}")
+        with img_lock:
+            mp_exception_error_queue.put(f"Error 04: {e}")
 
 # ------------End Of Main Functions----------------- #
 
