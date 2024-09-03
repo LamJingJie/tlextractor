@@ -284,7 +284,7 @@ async def ExtractData(chosen_frame: str, content: json, folder_name, prj_title, 
     
     # Submit all image saving tasks from 1 page at once to the multi-processing pool
     for task in img_tasks:
-        # task[0] is get_student_img(), task[1:] is other parameters
+        # task[0] is get_student_img(), task[1:] is other parameters (asset_id, name)
         processors.submit(task[0], *task[1:], content['assets'], chosen_frame, prj_title, date, folder_name,
                             images_obj_tracker, image_lock, mp_exception_error_queue)
 
@@ -399,13 +399,27 @@ def get_student_img(asset_id, student_name, assets, chosen_frame, prj_title, dat
         # Get the student image in the assets array
         if asset_id == asset['id']:
             img = asset['props']['src']
-            img_resize_save(img, folder_name, student_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock, mp_exception_error_queue)
+            img_resize_save(img, folder_name, student_name, date, prj_title, chosen_frame, images_obj_tracker, image_lock, mp_exception_error_queue, asset_id)
             break
             
 
 # Resize img and save it in seperate folder
-def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_title, chosen_frame, img_tracker_dict, img_lock, mp_exception_error_queue: Queue):
+def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_title, chosen_frame, img_tracker_dict, img_lock, mp_exception_error_queue: Queue, asset_id: str):
     Image.MAX_IMAGE_PIXELS = None
+    
+    asset_id = asset_id[len('asset:'):]
+
+    # Save Image with incremental unique id, prevent overwriting
+    img_name = prj_title + "__" + chosen_frame + "__" + date + \
+        "__" + student_name + "__" + asset_id + '.png'
+    
+    # Check for duplicates (None == not duplicate, True == duplicate)
+    with img_lock:
+        if img_tracker_dict.get(img_name):
+            return
+        else:
+            img_tracker_dict[img_name] = True
+
     # Check if the image is a base64 image rather than a url
     if (img_url.startswith('data:image') and img_url.find('base64,')):
         base64_index = img_url.find('base64,') + len('base64,')
@@ -421,8 +435,8 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
     # Write bytes into memory temporarily and use it to open the img
     img = Image.open(io.BytesIO(img_data))
 
-
     try:
+        
         if img.mode != 'RGBA':
             img = img.convert('RGBA')
 
@@ -443,15 +457,6 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
             img = img.resize((int(new_width), int(new_height)),
                              Image.Resampling.LANCZOS)  # Smooth the img
 
-
-        # Save Image with incremental unique id, prevent overwriting
-        img_name = prj_title + "___" + chosen_frame + "___" + date + \
-            "___" + student_name + "___"
-
-        with img_lock:
-            img_tracker_dict[img_name] = img_tracker_dict.get(img_name, 0) + 1
-            img_name += str(img_tracker_dict[img_name]) + '.png'
-            
         save_path = os.path.join(folder_name, img_name)
         img.save(save_path, format='PNG')
 
