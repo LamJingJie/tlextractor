@@ -421,7 +421,7 @@ def img_resize_save(img_url: URL | str, folder_name, student_name, date, prj_tit
             img_tracker_dict[img_name] = True
 
     # Check if the image is a base64 image rather than a url
-    if (img_url.startswith('data:image') and img_url.find('base64,')):
+    if (img_url.startswith('data:image') and img_url.find('base64,') != -1):
         base64_index = img_url.find('base64,') + len('base64,')
         # Decode everything after the base64, to get the image data
         img_data = base64.b64decode(img_url[base64_index:])
