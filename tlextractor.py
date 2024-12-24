@@ -193,7 +193,7 @@ async def ActivateBot(url, chosen_frame, folder_name, prj_title, mp_exception_er
             # Click menu btn and copy as json
             await page.click("[data-testid = 'main-menu.button']")
             await page.click("[data-testid = 'main-menu-sub.edit-button']")
-            await page.click("[data-testid='main-menu-sub.copy as-button']")
+            await page.click("[data-testid='main-menu-sub.copy-as-button']")
             await page.click("[data-testid='main-menu.copy-as-json']")
             clipboard_content = await page.evaluate("navigator.clipboard.readText()")
             json_content = json.loads(clipboard_content)
